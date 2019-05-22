@@ -1,0 +1,151 @@
+Seed Bank Data Compilation
+========================================================
+
+During the summer of 2011 I manipulated 10 plots at UNH-West Foss Farm and
+10 plots at LI-Caleb Smith in an attempt to examine affects of seedbank
+dynamics on *Frangula alnus* (Glossy buckthorn) population dynamics.
+The manipulation was as following:
+
+* I randomly chose 10 lat/long points each, contained within the 
+two previously established study areas.
+* I went to each point using a Garmin GPS.
+* At that points, I established a 1x1 meter plot in which the side
+of the plot was parallel to the magnetic North-South direction.
+* I cleared the plot of all plant material using a Council Fire Rake.
+Larger plants were cut at their base. All plant material was discarded
+nearby. 
+* The cleared 1x1 m plot was seperated into four quadrats. Oppisite 
+quadrats were selected at random and covered with landscaping cloth.
+
+These plots were setup at UNH-West Foss Farm on 17 & 18 AUG 2011 and
+at LI-Caleb Smith on 24 AUG 2011.
+
+On 7 MAY 2012 and 24 MAY 2012 I returned to UNH-WFF and LI-CS, respectively,
+and removed the landscape cloth. I counted all emerging seedlings in all 
+of the quadrats. Seedlings were tagged with a small plastic tag to facilitate
+counting at a later time. The collected data have mostly been transferred 
+from my field notebooks into the Excel file:
+`/Users/mlammens/Google Drive/F-alnus/Field-Work`
+
+Here I am documenting the steps I am taking to make this dataset usable
+in R for further analysis.
+
+## Seedbank CSV File
+
+I wrote a CSV file in the Chapter 5 Project folder, 
+subfolder `/data` named `FRAL_seedbank_plots.csv` that 
+contains the values location, site, plot, Aug. 2011 notes, and May 2012 notes. As originally written,
+each plot is represented in a single row, but I want to seperate these
+out into four rows per plot based on the quadrats.
+
+R Code Off
+```
+# Read in csv
+seedbank <- read.csv('data/FRAL_seedbank_plots.csv')
+# Define a vector of quadrat names
+quad.names <- c('NE','NW','SW','SE')
+# Create a data.frame in which each row from seedbank is repeated
+# four times.
+seedbank.full <- seedbank[ rep(row.names(seedbank), each=4),1:3 ]
+# Combine this data.frame with a column of the quadrat names
+seedbank.full <- data.frame(seedbank.full,quadrat=rep(quad.names,20))
+# Now write this new data.frame out as a csv file, replacing the 
+# original csv file.
+write.csv(seedbank.full,'data//FRAL_seedbank_seedlingCnt.csv',quote=FALSE,
+          row.names=FALSE)
+```
+
+## Seedling Counts
+
+Using the `seedbank.full` file, I manually set the quadrats that 
+were covered or not, and the number of seedlings found in each quadrat
+during survey periods. There were two survey periods for UNH-WFF and three
+survey periods for LI-CS. 
+
+For UNH-WFF, survey periods were:
+
+* 7 May 2012: All covered quadrats were uncovered and any seedlings were
+counted and tagged with a white plastic clip.
+* 24 Oct 2012: All quadrats were examined to see if white plastic clips
+were still present and to count the total number of seedlings in the quadrat.
+**No new seedlings were tagged at this time**
+
+For LI-CS, survey periods were:
+
+* 24 May 2012: All covered quadrats were uncovered and any seedlings were
+counted and tagged with a white plastic clip.
+* 27 Jun 2012: All quadrats were examined for a second time. Some tags were
+recovered (no longer attached, presumumbly because the seedling died). Any new
+seedlings were tagged with a white plastic clip.
+* __ Nov 2012: All quadrats were examined to see if white plastic clips
+were still present and to count the total number of seedlings in the quadrat.
+**No new seedlings were tagged at this time**
+
+I added the above seedling counts to the CSV file manually, based on
+field notes in my field notebooks and from field data sheets. My field
+data sheets have also been scanned, and a digital copy is here:
+`/Users/mlammens/Google Drive/F-alnus/Field-Work`
+
+## Using the new dataset
+
+### Change NAs to 0
+
+Here I read-in and manipulate this data set. One important manipulation I do
+here is to make all NA values equal to 0. This is to make calculations easier.
+Technically, if value in the dataset is NA, it is because either I did not 
+make a related observation or that variable was not collected at all. An
+example of the latter is the NAs for the `seedlingCnt.jun.2012` values for 
+UNH-WFF. I did not collect any such values from UNH-WFF, only from LI-CS.
+However, for the purposes of calculating various metrics, it is far easier if
+this values are 0s.
+
+```{r}
+# Define project directory
+FRAL_DEMOG_DIR <- '/Users/mlammens/Google Drive/F-alnus/Chapter-5-FRAL-Demography/'
+# Read seedbank_seedling csv
+seedbank <- read.csv(paste(FRAL_DEMOG_DIR,'data/FRAL_seedbank_seedlingCnt.csv',sep=''))
+# Make all NA values equal to 0.
+# Be careful using `replace` here, because it could change
+# factorial columns to numbers, or some other error. I checked 
+# that it worked here.
+seedbank <- replace(seedbank,is.na(seedbank),0)
+```
+
+### Calculate mean seedling count for covered vs. uncovered quadrats
+
+```{r}
+# Require plyr
+require(plyr)
+
+# Mean seedling count for covered vs. uncovered - May 2012
+ddply(.data=seedbank,.variable=c('covered'),fun=mean(seedlingCnt.may.2012),summarize)
+
+# Mean seedling count for covered vs. uncovered - Fall 2012
+ddply(.data=seedbank,.variable=c('covered'),fun=mean(seedlingCnt.fall.2012),summarize)
+```
+
+### Calculate mean seedling count for covered vs. uncovered quadrats separately for WFF and CS
+
+```{r}
+# Mean seedling count for cov. vs. uncov. - May 2012 - WFF and CS separately
+ddply(.data=seedbank,.variable=c('covered','site'),fun=mean(seedlingCnt.may.2012),summarize)
+
+# Mean seedling count for cov. vs. uncov. - Fall 2012 - WFF and CS separately
+ddply(.data=seedbank,.variable=c('covered','site'),fun=mean(seedlingCnt.fall.2012),summarize)
+```
+
+### Calculate the mortality rate for the seedbank plots
+
+Basing this on the number of **tagged** seedlings where the tags were later recovered
+
+```{r}
+# divide the `may.to.fall.2012.mortality` by the sum of 
+# `seedlingCnt.may.2012` and `seedlingCnt.jun.2012`
+# Note that I'm removing the tags that were missing, assuming
+# that I cannot classify them as dead or alive
+seedling.mortality.plot <- seedbank$may.to.fall.2012.mortality /
+  (seedbank$seedlingCnt.may.2012+seedbank$seedlingCnt.jun.2012-seedbank$may.to.fall.2012.missing)
+# Calcualte the mean value
+mean(seedling.mortality.plot,na.rm=TRUE)
+```
+

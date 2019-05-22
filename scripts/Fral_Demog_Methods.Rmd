@@ -1,0 +1,2907 @@
+```{r loadPackages, echo=FALSE, results='hide', message=FALSE}
+## ******************************************************************** ##
+## Fral_Demog_Methods.R
+##
+## Author: Matthew Aiello-Lammens
+## Date Created: 2013-08-16
+## --This document is largely based on the work originally done in
+## --Fral_Demog_Explore.R
+##
+## Purpose: This report documents the methods used in cunstructing
+## a demographic model for Frangula alnus. 
+##
+## ******************************************************************** ##
+
+## Load required packages
+require(plyr)
+require(reshape2)
+require(ggplot2)
+require(nls2)
+require(lattice)
+require(pander)
+require(car)
+require(grid)
+require(gridExtra)
+```
+
+Introduction
+=========
+
+Demographic models provide a way to examine population dynamics of 
+species and forecast population growth and/or decline. Here I outline the 
+methods used to construct a demographic model of *Frangula alnus*, a plant 
+native to Eurasia that has invaded northeast North America. I use both
+Integral Projection Modeling (IPM) methods and Matrix Projection Modeling 
+(MPM) methods. Model parameters are estimated using data collected during
+two and three field seasons at various locations in northeast North
+America as well as data from various publications and 
+reports.
+
+Methods and Results
+=========
+
+## Field Data Collection
+
+Demographic data were collected at two geographic locations
+during the Summer/Fall of 2010, 2011,
+and 2012 at three sites at each location. The two
+geographic locations were Long Island (LI), NY and the
+region around the University
+of New Hampshire (UNH), Durham, NH. These two geographic locations 
+have different climates. The UNH location has a cooler climate than
+the LI location, falling into USDA "Plant Hardiness" 
+Zone 5A, compared to 6B for LI. Mean annual precipitation near the
+LI sites is approximately 1270 mm and near the UNH sites is 1170 mm.
+These differences likely influence differences in *F. alnus* phenology.
+Plants at UNH tended to leaf out and fruit later in the spring compared
+to plants at LI.
+
+At each geographic location demographic 
+data were collected at three different
+sites. Sites were separated by 1 to 10 km and
+chosen to include a range of ecological conditions
+in which *F. alnus* grows, 
+spanning from areas where it was a dominant canopy 
+species to areas where it was an understory species (Table 1).
+Theses sites differed in soil moisture levels (as determined
+by the community composition). *F. alnus* is noted as a 
+species that readily establishes in wetland areas (REFS - Converse and others), however it also
+readily establishes in upland forest areas (REF - Lee).
+
+Location | Site Name | Community Type | Canopy Status
+:--------|:---------|:---------------|:-------------
+UNH | East Foss Farm (EFF) | Upland | Understory
+UNH | West Foss Farm (WFF) | Upland/Old Field | Overstory
+UNH | Thompson Farm (TOFA) | Wetland | Overstory
+LI | Stony Brook University - South P Lot (SBU_SouthP) | Upland | Understory
+LI | Stony Brook University - Siberia Lot (SBU_Sib) | Wetland/Upland | Understory
+LI | Caleb Smith State Park (Caleb_Smith) | Upland | Primarily Understory/ Some Overstory
+
+Table 1: Ecological categorization of field sites.
+
+```{r importData, echo=FALSE, results='hide', message=FALSE}
+## ******************************************************************** ##
+## Importing demographic data
+## ******************************************************************** ##
+FRAL_DEMOG_DIR <- '/Users/mlammens/Dropbox/F-Alnus/Chapter-5-FRAL-Demography/'
+setwd('/Users/mlammens/Dropbox/F-Alnus/Chapter-5-FRAL-Demography/')
+
+## Read in demographic data
+unh <- read.csv('data/unh_data.csv')
+li <- read.csv('data/li_data.csv')
+
+## Examine the data a little
+names(unh)
+names(li)
+
+## Make a `frt.2012.max` column for both data sets
+# Make NAs for summer counts 0
+li$fruit.jul.2012[is.na(li$fruit.jul.2012)] <- 0
+unh$fruit.aug.2012[is.na(unh$fruit.aug.2012)] <- 0
+# Choose max between summer and fall counts
+li$frt.2012.max <- apply(cbind(li$frt.2012,li$fruit.jul.2012),MARGIN=1,FUN=max,na.rm=TRUE)
+unh$frt.2012.max <- apply(cbind(unh$frt.2012,unh$fruit.aug.2012),MARGIN=1,FUN=max,na.rm=TRUE)
+
+```
+
+```{r cleanData, echo=FALSE}
+## ******************************************************************** ##
+## Data Censoring
+## ******************************************************************** ##
+## Some data has to be removed, either because of clearly incorrect 
+## measures, or some other reason:
+
+## Remove 'mac' site date. This site was part of the pilot data, and not
+## revisited in 2011 or 2012
+unh <- unh[which(unh$site!='mac'),]
+
+## Here are miscellaneous plants to remove
+## LI
+## Site   Tag   Years Reason for Removal
+## 196    2161  11-12 Incorrect DAH recorded in 2011
+## 261    SB3  11-12 Suspiciously large DAH for height and not found in 2012
+## 164    CS12-115    Accidently killed by Matt.
+li.rm <- which(li$tag %in% c('2161','SB3','CS12-115'))
+li <- li[-li.rm,]
+
+## UNH
+## wff    1081  11-12 Marked plant is actually sprout of another marked plant
+## wff    1121  11-12 DAH in 2011 likely incorrect
+## wff    1178  11-12 DAH in 2011 likely incorrect
+## tofa   480   11-12 DAH in 2011 likely incorrect
+## wff    1115  11-12 DAH in either 2011 or 2012 incorrect
+unh.rm <- which(unh$tag %in% c(1081,1121,1178,480,1115))
+unh <- unh[-unh.rm,]
+
+## Clean up workspace
+rm(unh.rm,li.rm)
+```
+
+```{r combineData, echo=FALSE}
+## ******************************************************************** ##
+## Combining UNH and LI Data into One Data Set
+## ******************************************************************** ##
+fral.df.names <- c('location','site','year1stTag','tag','plot',
+                   'dah.2010','height.2010','basalStems.2010','fruit.2010',
+                   'dah.2011','height.2011','basalStems.2011','fruit.2011',
+                   'dah.2012','height.2012','basalStems.2012','fruit.2012',
+                   'dah.2012.max','fruit.err.2012','fruit.summer.2012','fruit.2012.max',
+                   'mortality')
+# Get UNH columns
+unh.temp <- unh[ c('location','site','year1stTag','tag','subplot',
+                   'dah2010.cm','height2010.cm','basal_stems2010','fruit2010',
+                   'dah2011.cm','height2011.cm','basal_stems2011','fruit2011',
+                   'dah.2012','hgt.2012','basal.stem.2012','frt.2012',
+                   'dah.max.2012','frt.err.2012','fruit.aug.2012','frt.2012.max',
+                   'mortality.2012') ]
+names(unh.temp) <- fral.df.names
+# Get LI columns
+li.temp <- data.frame(li[c('location','site','year1stTag','tag','plot')],
+                      dah2010.cm=NA,height2010.cm=NA,basal_stems2010=NA,fruit2010=NA,
+                      li[c('dah2011.cm','height2011.cm','basal_stems2011','fruit2011',
+                           'dah.2012','hgt.2012','basal.stems.2012','frt.2012',
+                           'dah.max.2012','frt.err.2012','fruit.jul.2012','frt.2012.max',
+                           'mortality.2012') ])
+names(li.temp) <- fral.df.names
+# Combine UNH and LI
+fral.df <- rbind( unh.temp, li.temp)
+# Create a new variable for dah.2012
+fral.df$dah.2012.mod <- ifelse(is.na(fral.df$dah.2012.max),
+                                   yes=fral.df$dah.2012,
+                                   no=fral.df$dah.2012.max)
+# Clean up
+rm(list=ls(pattern='temp'))
+```
+
+Data were collected for three years at EFF and WFF 
+sites only (2010 - 2012). 
+For all other sites, data were collected for two years (2011 and 2012).
+At each site plants were selected randomly to be measured and
+tagged with a uniquely numbered metal tag or a 
+numbered plastic clip. Two different methods were used to select
+plants. At all sites, other than EFF, I delimited an area that included
+both the ecological condition I was investigating at that site and 
+presence of *F. alnus* by walking around the area and tracking my path
+using a GPS device. This process resulted in a polygon that contained
+the ecological conditions of interest and *F. alnus* plants. Using
+the Quantum GIS software (REF) I generated a random set of latitude and
+longitude coordinates within the polygon. I then navigated to twenty of these 
+coordinates using a GPS device and set these locations as the northwest 
+corner of 2x2 meter plots. 
+At each site
+plots were established such that no two plots were closer than 4 meters.
+Over the course of the study period, one plot at WFF was removed from
+sampling. 
+Within the 2x2 meter plot, all *F. alnus*
+plants greater than 5 cm in height were measured and tagged to 
+facilitate re-measurement in future seasons. Plant measurements 
+included:
+
+* Diameter at basal (ankle) height (DAH) in center meters (cm)
+* Height - continuous from 5 to 400 cm, categorical for taller (400-450 and >450)
+* Number of basal stems
+* Number of fruit on the tree
+
+At EFF I used a different sampling scheme to choose
+the individual plants to measure and tag. Here, I marked a large area within 
+a *F. alnus* infestation (30x30 m at EFF) and counted all plants within the
+area, classifying each as a seedling, sapling, non-reproductive 
+adult, or reproductive adult. These were approximate stage-classes. Using these 
+counts I estimated the stage-class distribution for the full 30x30 m area.
+I counted a total of 1,945 *F. alnus* plants -
+968 seedlings, 675 saplings, 181 non-reproductive adults, and 121 
+reproductive adults.  Prior to examining this site, I decided to 
+monitor 150 plants at this location. I randomly selected plants to 
+measure and tag such that 
+the number of plants sampled in each stage was approximately proportional 
+to the estimated stage distribution for the site (77 seedlings, 48 saplings, 
+15 non-reproductive adults, 10 reproductive adults). To determine which 
+of the 1,945 plants to sample I subdivided the area into 2x2 m subplots and 
+randomly selected a subset of 56 subplots where I measured 
+1 or 2 seedlings, 1 sapling, 
+1 or 0 non-reproductive adults, and 1 or 0 reproductive adults.
+Whether or not 1 or 2 seedlings or 1 or 0 adults were measured in a subplot
+was based on a simulated random coin-flip and plant availability.
+
+Across all six sites, `r nrow(fral.df)` individual plants were 
+tagged with a unique identifier and measured, 
+`r length(which(fral.df$year1stTag==2010))` first tagged in 2010, 
+`r length(which(fral.df$year1stTag==2011))` in 2011, 
+and `r length(which(fral.df$year1stTag==2012))` in 2012.
+All measurements were taken between September and November each year, 
+and each site was surveyed at approximately the same time during
+the different field seasons. In addition to these measurements, the number of
+fruit on tagged plants were counted during the summer of 2012 at four of the 
+six sites (UNH - EFF and WFF, LI - Caleb Smith and SBU SouthP). These 
+measurements were taken to estimate differences in timing of fruit set
+within a season and were used to estimate maximum fruit per plant values.
+In addition to these plants, 385 seedlings were marked during the 2011
+field season and counted in 2012 (see below **Seedling Observations**).
+
+### Data Censoring and Cleaning
+
+Some data were removed based on notes recorded while
+collecting the data or evidence that measurement values were likely incorrectly
+recorded. In total data collected on ten plants were ignored.
+Eight plants were censored primarily because 
+recorded DAH values resulted in unrealistic size transitions. Data 
+on two plants were removed because the plants were either not found, 
+or were accidentally killed during sampling.
+
+```{r echo=FALSE}
+### Modified DAH and Fruit Count values for 2012 season
+# 
+# During the 2012 field season, I took measurements
+# that can be used to calculate modified DAH and Fruit Count
+# values. For DAH, I measured maximum DAH values for plants
+# whose step was oval shaped (rather than circular shaped).
+# In years past (2010,2011) only one measurement was taken,
+# which was the maximum DAH value. The modified DAH value for
+# 2012 is the maximum DAH for all plants (i.e., DAH for those
+# plants for which a max was not recorded).
+```
+
+### Seedling Observations
+
+At two sites (WFF and TOFA), I was unable to mark all seedlings (defined as 
+individuals smaller than approximately 
+5 cm in height or 0.10 cm in basal diameter)
+due to their high abundance. Therefore, at these sites I 
+marked all seedlings within a haphazardly located 0.5x0.5 m 
+**seedling subplot** within the regular 2x2 m plot during the 2011 field season. 
+I counted these seedlings and marked them
+with white plastic tags to differentiate between new seedlings
+and old seedlings in subsequent years. During the 2012 field season
+I recounted the seedlings in the **seedling subplots** and recovered tags
+on dead *F. alnus* plants. These data were used to estimate inter-annual
+seedling survival.
+
+```{r seedlingMortality,echo=FALSE,results='hide',fig.keep='none'}
+## Read in seedling subplot data
+seed.subplot.df <- read.csv(paste(FRAL_DEMOG_DIR,'data/unh_seedling_subplots.csv',sep=''))
+
+## What percetange of seedling markers were observed (either alive or dead)
+## in 2012?
+percent.obs <- (seed.subplot.df$seed.observed.2012+seed.subplot.df$seed.dead.2012) / 
+  seed.subplot.df$seed.marked.2011
+
+## Mean percentage of seedlings observed in 2012
+mean(percent.obs)
+## Weighted-mean percentage of seedligns observed in 2012, 
+## weighted by the nubmer that were tagged in 2011
+weighted.mean(percent.obs,w=seed.subplot.df$seed.marked.2011)
+
+## Seedling surivival, **conditional on being observed in 2012**
+## --This effectively is censoring the data if no tag was observed
+## --in 2012
+seed.subplot.df$survival.cond <- seed.subplot.df$seed.observed.2012 / 
+  (seed.subplot.df$seed.observed.2012+seed.subplot.df$seed.dead.2012)
+seed.subplot.df$survival.cond[is.na(seed.subplot.df$survival.cond)] <- 0
+weighted.mean(seed.subplot.df$survival.cond,w=seed.subplot.df$seed.marked.2011)
+
+seedling.betweenYr.surv <- 
+  weighted.mean(seed.subplot.df$survival.cond,w=seed.subplot.df$seed.marked.2011)
+
+## Plot survival versus total number of seedlings in that plot
+ggplot(seed.subplot.df,aes(x=seed.marked.2011,y=survival.cond)) + #,
+                           #colour=factor(Density.Cat.2011))) +
+  geom_point() + 
+  stat_smooth(method='lm')
+
+## Seedling survival, **assuming all unobserved = mortality**
+seed.subplot.df$survival.assume <- seed.subplot.df$seed.observed.2012 /
+  seed.subplot.df$seed.marked.2011
+weighted.mean(seed.subplot.df$survival.assume,w=seed.subplot.df$seed.marked.2011)
+
+seedling.betweenYr.survLow <-
+  weighted.mean(seed.subplot.df$survival.assume,w=seed.subplot.df$seed.marked.2011)
+
+## Plot survival versus total number of seedlings in that plot
+ggplot(seed.subplot.df,aes(x=seed.marked.2011,y=survival.assume)) + #,
+                           #colour=factor(Density.Cat.2011))) +
+  geom_point() +
+  geom_smooth(method='lm')
+
+```
+
+### Density Dependence
+
+Many factors governing population growth are density-dependent. 
+For many plants the effects of competition for limited 
+light or water availability depend on the density of neighboring
+plants. Properly parameterizing density-dependent growth effects 
+is challenging when modeling any species, and plant models present
+their own unique challenges. For example, because plants are sessile,
+density-dependence effects are generally localized to the immediate
+vicinity of the individual. In my model, I parameterized 
+density-dependence effects by examining the effect of density on 
+fruit production for plants within the 2x2 m plots. To do this, 
+I first categorized individual plants into discrete DAH size classes.
+I examined the use of two different sets of size classes, one with 
+nine size classes and one with four size classes. Plants were categorized
+into nine size classes by defining a class as a 0.5 cm interval, starting 
+from 0.0 cm and going to 4.0 cm. All plant larger than 4.0 cm DAH were 
+grouped into a single class. Plants were categorized into four DAH *super* classes
+by grouping the original classes into groups that appeared to have similar
+responses to density (Table 2).
+
+DAH Class | DAH Size Range
+:---------|:--------------
+A | 0 - 0.5 cm
+B | 0.5 - 2 cm
+C | 2 - 3.5 cm
+D | > 3.5 cm
+
+Table 2: DAH Size Classes 
+
+For both sets DAH classes, 
+I calculated three different density measures:
+
+* **Plot Density:** The number of *F. alnus* plants in each plot.
+This is a *plot specific* value, and was thus the same for both
+sets of DAH Classes.
+* **Effective Density:** The *effective* density for each plant, 
+which is defined
+as the total number of plants in its DAH class or greater.
+While technically this is calculated as a *plant specific* value,
+all plants in the same DAH class within a given plot will have the
+same value.
+* **DAH-Effective Density:** This density measure is defined as
+the proportional cumulative basel stem area 
+($\pi{\frac{DAH}{2}}^2$) of all plants in the same DAH class or greater
+as an individual plant. This measure is *plant specific*.
+
+Both the **Effective Density** and **DAH-Effective Density**
+are meant to more accurately reflect the fact that density dependence
+effects should be different for different sized plants. That is, in 
+terms of resource competition, large
+plants are likely not as affected by small plants, but small plants
+are likely to be affected by larger plants. 
+These density measures were exactly calculated for plants at all
+sites, with the exception of EFF (due to the nature of sampling at that
+site, see above). For plants at EFF, I estimated **Effective Density** 
+using the four approximate stage categories - seedling,
+sapling, non-reproductive adult, and reproductive adult. Given the
+variability in measured DAH values, I was unable to estimate 
+DAH-Effective density values for plants at this site.
+All *F. alnus* plants in the 30x30 m plot at EFF were counted in 2010 only.
+Therefore, for this site, I used
+the same density values for all three years. 
+While not ideal, this is a fairly good approximation 
+given that there are no seedling plots here
+and other than seedlings, the number of *F. alnus* plants
+changes very little within plots from year to year.
+
+While it is likely that there are density dependent effects on
+*F. alnus* growth and survival rates, the data that are currently
+available to me do not allow for parameterization of these effects.
+
+```{r plotDensity, echo=FALSE}
+## ******************************************************************** ##
+### Number of plants per plot and cumulative DAH per plot
+## ******************************************************************** ##
+
+## Determine the number of plants measured in each plot individually
+## for each year.
+fral.df <- ddply(.data=fral.df,
+                 .variables=c('site','plot'),
+                 plot.dens.2010=length(which(!is.na(dah.2010))),
+                 plot.dens.2011=length(which(!is.na(dah.2011))),
+                 plot.dens.2012=length(which(!is.na(dah.2012))),
+                 transform)
+
+## Determine the cumulative area (based on DAH) of all plants 
+## measured in each plot individually for each year.
+fral.df <- ddply(.data=fral.df,
+                 .variables=c('site','plot'),
+                 plot.densDAH.2010=sum((dah.2010/2)^2,na.rm=TRUE),
+                 transform)
+fral.df$plot.densDAH.2010[which(fral.df$plot.densDAH.2010==0)] <- NA
+fral.df <- ddply(.data=fral.df,
+                 .variables=c('site','plot'),
+                 plot.densDAH.2011=sum((dah.2011/2)^2,na.rm=TRUE),
+                 transform)
+fral.df$plot.densDAH.2011[which(fral.df$plot.densDAH.2011==0)] <- NA
+fral.df <- ddply(.data=fral.df,
+                 .variables=c('site','plot'),
+                 plot.densDAH.2012=sum((dah.2012.mod/2)^2,na.rm=TRUE),
+                 transform)
+fral.df$plot.densDAH.2012[which(fral.df$plot.densDAH.2012==0)] <- NA
+
+## Change plot.densDAH.201X values for EFF sites to NA, since
+## I did not collect data to parameterize these values.
+fral.df[which(fral.df$site=='eff'),
+  c('plot.densDAH.2010','plot.densDAH.2011','plot.densDAH.2012')] <- NA
+
+## Change density values for EFF, because of different sampling scheme
+# Read in EFF Plot data
+eff <- read.csv(paste(FRAL_DEMOG_DIR,'data/unh_eff_plotDensity.csv',sep=''))
+# Determine EFF entries to fral.df
+fral.df.eff <- which(fral.df$site=='eff')
+# Determine EFF subplots where plants were tagged
+eff.plots <- unique(match(fral.df[fral.df.eff,'plot'],eff$subplot))
+# Get EFF plot and plant categorization for plots where plants were tagged
+eff.df <- eff[eff.plots,c('subplot','seedlings','saplings','nr_adults','r_adults')]
+# Rename columns to match classification in `unh` data.frame
+names(eff.df) <- c('subplot','seed','sap','nra','ra')
+# Calcualte effective densities for each size class
+# Subtract 1 to account to for the fact that you do not want
+# the plant to consider itself when measuring density dependent
+# effects
+eff.df$seed.dens.effect <- rowSums(eff.df[c('seed','sap','nra','ra')])-1
+eff.df$sap.dens.effect <- rowSums(eff.df[c('sap','nra','ra')])-1
+eff.df$nra.dens.effect <- rowSums(eff.df[c('nra','ra')])-1
+eff.df$ra.dens.effect <- rowSums(eff.df[c('ra')])-1
+
+# Get the total plant count for these plots from the eff data.fram
+fral.df.eff.dens <- eff[match(fral.df[fral.df.eff,'plot'],eff$subplot),'total']
+# Set the density values in fral.df to these values
+fral.df[fral.df.eff,c('plot.dens.2010','plot.dens.2011','plot.dens.2012')] <- fral.df.eff.dens
+```
+
+```{r dahClassify, echo=FALSE}
+## ******************************************************************** ##
+## Calculate DAH Size Classes
+## ******************************************************************** ##
+fral.df$dah.class.2010 <- fral.df$dah.2010 %/% 0.5
+fral.df$dah.class.2011 <- fral.df$dah.2011 %/% 0.5
+fral.df$dah.class.2012 <- fral.df$dah.2012.mod %/% 0.5
+
+## ******************************************************************** ##
+## Categorize plants into "super" classes
+## -- these classifications are groupings of the finer resolution 
+## -- classifications set above. These are based on previous observations
+## -- of the effects of density dependence on plants.
+## ******************************************************************** ##
+set_dah_superclass <- function( dah.class ){
+  if (is.na(dah.class)){
+    superclass <- NA
+  } else {
+    if(dah.class == 0){ 
+      superclass <- 'A'
+    } else if (dah.class >= 1 & dah.class <= 3){
+      # 0.5 to 2
+      superclass <- 'B'
+    } else if (dah.class >= 4 & dah.class <= 6){
+      # 2 to 3.5
+      superclass <- 'C'
+    } else if (dah.class >= 7){
+      # greater than 3.5
+      superclass <- 'D'
+    }
+  }
+  return(superclass)
+}
+
+fral.df$dah.superclass.2010 <- sapply(fral.df$dah.class.2010,FUN=set_dah_superclass)
+fral.df$dah.superclass.2011 <- sapply(fral.df$dah.class.2011,FUN=set_dah_superclass)
+fral.df$dah.superclass.2012 <- sapply(fral.df$dah.class.2012,FUN=set_dah_superclass)
+```
+
+```{r effDens_noEFF, echo=FALSE}
+## ******************************************************************** ##
+#### Calculate *effective* density for all plants *not* at EFF 
+#### -- Nine DAH Classes --
+## ******************************************************************** ##
+
+## Add empty columns for effective density values
+fral.df$densEffect.2010 <- NA
+fral.df$densEffect.2011 <- NA
+fral.df$densEffect.2012 <- NA
+fral.df$densEffect.9class.2010 <- NA
+fral.df$densEffect.9class.2011 <- NA
+fral.df$densEffect.9class.2012 <- NA
+
+## Subset the data.frames into noEFF and EFF sets
+fral.df_noEFF <- subset(fral.df,subset=fral.df$site!='eff')
+fral.df_EFF <- subset(fral.df,subset=fral.df$site=='eff')
+
+## Calculate effective density at noEFF sites
+for ( plant in 1:nrow(fral.df_noEFF) ){
+  # Determine the plant site and plot
+  p.site <- fral.df_noEFF$site[plant]
+  p.plot <- fral.df_noEFF$plot[plant]
+  # Subset the data by site and plot
+  fral.df_sub <- 
+    subset(fral.df_noEFF,subset=(site==p.site & plot==p.plot))
+  # Remove itself from the subsetted data
+  fral.df_sub <-
+    fral.df_sub[-which(fral.df_sub$tag==fral.df_noEFF$tag[plant]), ]
+  # Calculate the number of plants of equal or larger DAH class
+  # 2010
+  fral.df_noEFF$densEffect.9class.2010[plant] <-
+    length(which(fral.df_sub$dah.class.2010 >= fral.df_noEFF$dah.class.2010[plant]))
+  # 2011
+  fral.df_noEFF$densEffect.9class.2011[plant] <-
+    length(which(fral.df_sub$dah.class.2011 >= fral.df_noEFF$dah.class.2011[plant]))
+  # 2012
+  fral.df_noEFF$densEffect.9class.2012[plant] <-
+    length(which(fral.df_sub$dah.class.2012 >= fral.df_noEFF$dah.class.2012[plant]))
+  
+  ## Calculate the cumulaitive DAH for plants of equal or larger DAH class
+  # 2010
+  fral.df_noEFF$dens.dahEffect.9class.2010[plant] <-
+    sum(((fral.df_sub$dah.2010[which(fral.df_sub$dah.class.2010 >= fral.df_noEFF$dah.class.2010[plant])])/2)^2)
+  # 2011
+  fral.df_noEFF$dens.dahEffect.9class.2011[plant] <-
+    sum(((fral.df_sub$dah.2011[which(fral.df_sub$dah.class.2011 >= fral.df_noEFF$dah.class.2011[plant])])/2)^2)
+  # 2012
+  fral.df_noEFF$dens.dahEffect.9class.2012[plant] <-
+    sum(((fral.df_sub$dah.2012[which(fral.df_sub$dah.class.2012 >= fral.df_noEFF$dah.class.2012[plant])])/2)^2)
+  
+  }
+```
+
+```{r effDens_noEFF_superClass, echo=FALSE}
+## ******************************************************************** ##
+#### Calculate *effective* density for all plants *not* at EFF
+#### -- Four DAH super classes --
+## ******************************************************************** ##
+
+## Calculate effective density at noEFF sites
+for ( plant in 1:nrow(fral.df_noEFF) ){
+  # Determine the plant site and plot
+  p.site <- fral.df_noEFF$site[plant]
+  p.plot <- fral.df_noEFF$plot[plant]
+  # Subset the data by site and plot
+  fral.df_sub <- 
+    subset(fral.df_noEFF,subset=(site==p.site & plot==p.plot))
+  # Remove itself from the subsetted data
+  fral.df_sub <-
+    fral.df_sub[-which(fral.df_sub$tag==fral.df_noEFF$tag[plant]), ]
+  # Calculate the number of plants of equal or larger DAH class
+  # 2010
+  fral.df_noEFF$densEffect.2010[plant] <-
+    length(which(fral.df_sub$dah.superclass.2010 >= fral.df_noEFF$dah.superclass.2010[plant]))
+  # 2011
+  fral.df_noEFF$densEffect.2011[plant] <-
+    length(which(fral.df_sub$dah.superclass.2011 >= fral.df_noEFF$dah.superclass.2011[plant]))
+  # 2012
+  fral.df_noEFF$densEffect.2012[plant] <-
+    length(which(fral.df_sub$dah.superclass.2012 >= fral.df_noEFF$dah.superclass.2012[plant]))
+  
+  ## Calculate the cumulaitive DAH for plants of equal or larger DAH class
+  # 2010
+  fral.df_noEFF$dens.dahEffect.2010[plant] <-
+    sum(((fral.df_sub$dah.2010[which(fral.df_sub$dah.superclass.2010 >= fral.df_noEFF$dah.superclass.2010[plant])])/2)^2)
+  # 2011
+  fral.df_noEFF$dens.dahEffect.2011[plant] <-
+    sum(((fral.df_sub$dah.2011[which(fral.df_sub$dah.superclass.2011 >= fral.df_noEFF$dah.superclass.2011[plant])])/2)^2)
+  # 2012
+  fral.df_noEFF$dens.dahEffect.2012[plant] <-
+    sum(((fral.df_sub$dah.2012[which(fral.df_sub$dah.superclass.2012 >= fral.df_noEFF$dah.superclass.2012[plant])])/2)^2)
+  
+  }
+```
+
+```{r effDens_EFF, echo=FALSE}
+## Approximate the effective density at EFF sites based on 
+## 2010 whole 30x30 m plot survey
+# As I have mentioned previously, the sampling scheme used at EFF differs from
+# that used at the other 5 sites. At EFF I do not have DAH measures for all of the
+# plants in plot, however I do have crude classifications for the number of plants 
+# in each of four categories: seedlings, saplings, non-reproductive adults, and 
+# reproductive adults. 
+
+
+for ( plant in 1:nrow(fral.df_EFF) ){
+  # find this plant in the `unh` data.frame and get all information for it
+  p.unh <- 
+    unh[which(unh$site=='eff' & unh$tag==as.character(fral.df_EFF$tag[plant])),]
+  # determine the plot the plant is in
+  p.plot <- p.unh$subplot
+  # get plant size category from 2010 survey
+  p.type <- p.unh$type2010
+  # add 'dens.effect' to make an index for `eff.df` data.frame
+  p.dens.effect.cat <- paste(p.type,'.dens.effect',sep='')
+  # get previously calculated plot effective density for this plants size type
+  fral.df_EFF$densEffect.2010[plant] <-
+    eff.df[which(eff.df$subplot==p.plot),p.dens.effect.cat]
+}
+
+## Set dens.dahEffect as NAs
+fral.df_EFF$dens.dahEffect.2010 <- NA
+fral.df_EFF$dens.dahEffect.2011 <- NA
+fral.df_EFF$dens.dahEffect.2012 <- NA
+
+## Set dens.dahEffect.9class as NAs
+fral.df_EFF$dens.dahEffect.9class.2010 <- NA
+fral.df_EFF$dens.dahEffect.9class.2011 <- NA
+fral.df_EFF$dens.dahEffect.9class.2012 <- NA
+
+### TO-DO: Account for change DAH from 2010 to 2011 and 2011 to 2012
+fral.df_EFF$densEffect.2011 <- fral.df_EFF$densEffect.2010
+fral.df_EFF$densEffect.2012 <- fral.df_EFF$densEffect.2010
+
+## Use this Effective Density estimate for 9class as well
+fral.df_EFF$densEffect.9class.2010 <- fral.df_EFF$densEffect.2010
+fral.df_EFF$densEffect.9class.2011 <- fral.df_EFF$densEffect.2010
+fral.df_EFF$densEffect.9class.2012 <- fral.df_EFF$densEffect.2010
+```
+
+```{r echo=FALSE,fig.keep='none',results='hide'}
+### EXPLORATION - look at DAH summary values for the different
+### size categories used at EFF in 2010
+ddply(.data=subset(unh,subset=site=='eff'),
+      .variables=c('type2010'),
+      Mean.DAH=mean(dah2010.cm),
+      summarize)
+ggplot(subset(unh,subset=site=='eff'),aes(x=dah2010.cm,colour=type2010)) +
+  geom_density()
+```
+
+```{r echo=FALSE}
+## ******************************************************************** ##
+## Join Non-EFF and EFF data sets 
+## ******************************************************************** ##
+fral.df <- rbind(fral.df_EFF,fral.df_noEFF)
+```
+
+```{r echo=FALSE}
+## Clean up
+rm(fral.df_EFF,fral.df_noEFF,fral.df_sub,p.unh)
+```
+
+```{r echo=FALSE}
+## ******************************************************************** ##
+## Make a `fral.df` data.frame with annual observations in individual rows
+## ******************************************************************** ##
+
+## Define plant ID variables
+fral.ids <- c('location','site','year1stTag','tag','plot')
+
+## Separate DAH values
+## ***
+fral.df.ann <- melt(data=fral.df[c(fral.ids,'dah.2010','dah.2011','dah.2012.mod')],
+                    id.vars=fral.ids)
+## Make `variable` column into an observation year ID `obs.year`
+fral.df.ann$variable <- sub(pattern='.*([0-9]{4}).*',replacement='\\1',fral.df.ann$variable)
+## Change column names
+names(fral.df.ann) <- c(fral.ids,'obs.year','dah')
+
+## Separate dah.class values
+fral.df.ann$dah.class <- 
+  melt(data=fral.df[c(fral.ids,'dah.class.2010','dah.class.2011','dah.class.2012')],
+       id.vars=fral.ids)$value
+
+## Separate dah.superclass values
+fral.df.ann$dah.superclass <- 
+  melt(data=fral.df[c(fral.ids,'dah.superclass.2010','dah.superclass.2011','dah.superclass.2012')],
+       id.vars=fral.ids)$value
+
+## Separate Height values
+fral.df.ann$height <- melt(data=fral.df[c(fral.ids,'height.2010','height.2011','height.2012')],
+                    id.vars=fral.ids)$value
+
+## Separate BasalStems values
+fral.df.ann$basalStems <- 
+  melt(data=fral.df[c(fral.ids,'basalStems.2010','basalStems.2011','basalStems.2012')],
+       id.vars=fral.ids)$value
+
+## Separate fruit values
+fral.df.ann$fruit <- 
+  melt(data=fral.df[c(fral.ids,'fruit.2010','fruit.2011','fruit.2012.max')],
+       id.vars=fral.ids)$value
+
+## Separate plot.dens values
+fral.df.ann$plot.dens <- 
+  melt(data=fral.df[c(fral.ids,'plot.dens.2010','plot.dens.2011','plot.dens.2012')],
+       id.vars=fral.ids)$value
+
+## Separate plot.densDAH values
+fral.df.ann$plot.densDAH <- 
+  melt(data=fral.df[c(fral.ids,'plot.densDAH.2010','plot.densDAH.2011','plot.densDAH.2012')],
+       id.vars=fral.ids)$value
+
+## Separate densEffect values
+fral.df.ann$densEffect <- 
+  melt(data=fral.df[c(fral.ids,'densEffect.2010','densEffect.2011','densEffect.2012')],
+       id.vars=fral.ids)$value
+
+## Seperate dens.dahEffect values
+fral.df.ann$dens.dahEffect <- 
+  melt(data=fral.df[c(fral.ids,'dens.dahEffect.2010','dens.dahEffect.2011','dens.dahEffect.2012')],
+       id.vars=fral.ids)$value
+
+## Separate densEffect.9class values
+fral.df.ann$densEffect.9class <- 
+  melt(data=fral.df[c(fral.ids,'densEffect.9class.2010','densEffect.9class.2011','densEffect.9class.2012')],
+       id.vars=fral.ids)$value
+
+## Seperate dens.dahEffect.9class values
+fral.df.ann$dens.dahEffect.9class <- 
+  melt(data=fral.df[c(fral.ids,'dens.dahEffect.9class.2010','dens.dahEffect.9class.2011','dens.dahEffect.9class.2012')],
+       id.vars=fral.ids)$value
+
+## Remove any entries with DAH = NA
+fral.df.ann <- fral.df.ann[ -which(is.na(fral.df.ann$dah)), ]
+
+```
+
+```{r plotDens_Hist, echo=FALSE, warning=FALSE}
+## ******************************************************************** ##
+## Examine differences in plot densities across sites
+## ******************************************************************** ##
+
+## Melt the data frame
+fral.dens_m <- melt(fral.df, id.vars=which(!(grepl(pattern='plot.dens.[0-9]{4}$',x=names(fral.df)))))
+## Cast the data frame so that I only have the density for each plot
+## -- I'm using mean because I know the variable is the same value for
+## -- each tag. I don't actually want a mean, but this gives me the 
+## -- single number I do want.
+fral.dens_c <- dcast(data=fral.dens_m,formula=site+plot~variable,mean)
+## Melt the new data.frame so it's in a format usable in ggplot
+fral.dens_cm <- melt(fral.dens_c,id.vars=1:2)
+## Remove plots with density = 0, as these are really not sampled at all
+fral.dens_cm <- fral.dens_cm[-which(fral.dens_cm$value==0),]
+```
+
+```{r plotDensFig, echo=FALSE, warning=FALSE,fig.width=10,fig.keep='none'}
+## ******************************************************************** ##
+## Summary figure for the plot densities
+## ******************************************************************** ##
+
+## Make plots
+ggplot(data=fral.dens_cm,aes(x=value)) +
+  geom_histogram(binwidth=1) +
+  facet_grid(variable~.) +
+  xlab('Plants per plot')
+
+ggplot(data=fral.dens_cm,aes(x=value,colour=site)) +
+  geom_density() +
+  facet_grid(variable~.) +
+  xlab('Plants per plot')
+```
+
+### Differences in Plot Density Among Sites
+
+Plot density values varied across sites, but were similar 
+within sites from year to year (Figure 1).
+I performed an ANOVA to assess if there were 
+significatn differences in plot density between sites using the 2012
+*plot density* values, and used Tukey's HSD
+to perform pair-wise comparisons.
+Based on the ANOVA results, it is clear that the number of plants 
+per plot differs among sites (Tables 3 and 4).
+
+```{r plotDensity2, echo=FALSE,results='hide',fig.cap='Figure 1: Mean plot density values (error bars = Standard Deviation), seperated by **Site** and **Year**'}
+## Calculate mean plot density
+fral.df_m <- melt(fral.df[c(1:5,24:26)],
+                  id.vars=1:5)
+fral.df_cast <- dcast(fral.df_m, site~variable, mean, na.rm=TRUE)
+fral.df_cast_sd <- dcast(fral.df_m,site~variable,sd)
+fral.df_plot.dens <- fral.df_cast[c('site','plot.dens.2010','plot.dens.2011','plot.dens.2012')]
+fral.df_plot.dens.sd <- fral.df_cast_sd[c('site','plot.dens.2010','plot.dens.2011','plot.dens.2012')]
+print('Mean number of plants per plot -- separated by year and site')
+print(fral.df_plot.dens[c('site','plot.dens.2011','plot.dens.2012')])
+#print('Mean number of plants per plot -- separated by year, grouped by site')
+#apply(X=fral.df[c('plot.dens.2011','plot.dens.2012')],
+#      MARGIN=2,
+#      FUN=mean)
+
+## Make some bar plots
+# First melt the data.frame
+fral.df_plot.dens <- melt(fral.df_plot.dens,id.vars=1)
+# Add the sd
+fral.df_plot.dens$sd <- melt(fral.df_plot.dens.sd,id.vars=1)$value
+
+ggplot(fral.df_plot.dens,aes(x=site,y=value,fill=variable)) +
+  geom_bar(stat='identity',position='dodge') +
+  geom_errorbar(aes(ymin=value-sd,ymax=value+sd),position='dodge') +
+  ylab('Plants per Plot') +
+  xlab('Site') +
+  scale_fill_discrete( name='Observation\nYear',
+                       breaks=c('plot.dens.2010','plot.dens.2011','plot.dens.2012'),
+                       labels=c('2010','2011','2012') )
+```
+
+```{r densAnova,echo=FALSE}
+## Perform a simple ANOVA to assess if there are differences
+## in the plot density values based on site
+plot_densXsite_anova <- anova(lm(fral.dens_c$plot.dens.2012~fral.dens_c$site))
+#pander(plot_densXsite_anova)
+
+## There appears to be support for differences
+plot_densXsite_HSD <- TukeyHSD(aov(fral.dens_c$plot.dens.2012~fral.dens_c$site))
+#pander(plot_densXsite_HSD)
+```
+
+Source | Df | Sum Sq | Mean Sq | F value | Pr(>F)
+:------|:---|:-------|:--------|:--------|:------
+**Sites**| 5 | 2088 | 417.5 | 9.68 | 5.072e-08
+**Residuals** | 149 | 6427 | 43.13            
+
+Table 3: Results of analysis of variance examining if plot density
+values differ among sites.
+
+Many of the significant pair-wise differences
+can be explained by differences in ecological conditions (Table 4).
+For example, SBU-Sib, a mixed wetland/upland site, is different than
+Caleb Smith, a full upland site. Other results are 
+more difficult to interpret, such as the lack of support for a significant difference
+between the two SBU sites and TOFA. 
+However, while these are ecological dissimilar,
+plots at both sites had relatively low density values.
+
+Comparison | Difference in Means | Lwr CI | Upr CI | p adj
+------------|------|-----|-----|-------
+**tofa-eff**        | -5.386  |-10.33| -0.4464|  0.02389 *
+**wff-eff**           |1.767  |-3.267 | 6.801 |  0.9129
+**caleb_smith-eff**    |  -0.7857| -5.725|  4.154|   0.9974
+**sbu_sib-eff**        |-8.336|  -13.28| -3.396|  4.067e-05 *
+**sbu_southp-eff**      |-7.436 | -12.38| -2.496|  0.0003621 *
+**wff-tofa**          |7.153 | 1.078  | 13.23 |   0.011 *
+**caleb_smith-tofa**   |    4.6  | -1.396|  10.6  |  0.2372
+**sbu_sib-tofa**      |  -2.95  |-8.946 | 3.046 |  0.7146
+**sbu_southp-tofa**    |   -2.05 | -8.046 | 3.946 |  0.9214
+**caleb_smith-wff**     | -2.553 | -8.627 | 3.522 |  0.8298
+**sbu_sib-wff**         |-10.1 | -16.18 |-4.028 | 5.516e-05 *
+**sbu_southp-wff**      |-9.203 | -15.28| -3.128|  0.0003244 *
+**sbu_sib-caleb_smith**  |   -7.55 | -13.55| -1.554|  0.005039 * 
+**sbu_southp-caleb_smith**  | -6.65 | -12.65 |-0.6539 | 0.02033 *
+**sbu_southp-sbu_sib**      |0.9  | -5.096  |6.896|    0.998
+
+Table 4: Results of Tukey HSD test of differences in plot density 
+among sites.
+
+Within sites, 
+there is substantial variability in plot density, particularly
+at Caleb Smith and WFF. Also, the density values
+at sites SBU-Sib and SBU-SouthP are much lower than other sites 
+sampled. As discussed above, 
+plot density values at EFF are based on only one 
+year (2010). Additionally, the large difference in values from 2010 to 2011
+at WFF is the result of increasing the number of plots sampled by 14 plots
+at this site in 2011. Thus, it appears that there is relatively little 
+change in plot density values from year to year.
+
+```{r echo=FALSE}
+## Clean up
+rm(fral.dens_m,fral.dens_c,fral.dens_cm)
+rm(fral.df_cast, fral.df_cast_sd,fral.df_m,fral.df_plot.dens,fral.df_plot.dens.sd)
+```
+
+```{r sizeDist, echo=FALSE, warning=FALSE, fig.keep='none'}
+## ******************************************************************** ##
+## Plant Size (DAH) Distribution
+## Size distributions separated by Year and Location (color)
+## ******************************************************************** ##
+ggplot(data=fral.df.ann,aes(x=dah,fill=location)) +
+  geom_histogram(position="identity",binwidth=.1,alpha=0.6) +
+  facet_grid(obs.year~.) +
+  xlab('DAH')
+
+# In general, plants observed at the three Long Island sites are 
+# smaller than those observed at the UNH sites.
+```
+
+```{r sizeDens, echo=FALSE, warning=FALSE,fig.width=10,fig.keep='none'}
+## ******************************************************************** ##
+## Density plots of plant size, separated by Year, Locations, and Site (color)
+## ******************************************************************** ##
+ggplot(data=fral.df.ann,aes(x=dah,colour=site)) +
+  #geom_histogram(position="identity",binwidth=.1,alpha=0.6) +
+  geom_density() +
+  facet_grid(obs.year~location) +
+  xlab('DAH')
+```
+
+### Effect of plot density on DAH
+
+There was weak negative relationship between plot density and the
+DAH values of plants in that plot (Figure 2), indicating that in higher density
+plots, plants tend to have smaller DAH values. 
+This may be the result
+of negative density dependence effects on growth, however the collected data neither
+support nor refute this hypothesis (see below).
+
+```{r echo=FALSE, warning=FALSE,fig.cap='Figure 2: Plant DAH versus Plot Density'}
+ggplot(data=fral.df.ann,aes(x=plot.dens,y=dah,colour=site)) +
+  geom_point() +
+  geom_smooth(method='lm') + 
+  facet_grid(obs.year~.) +
+  xlab('Plot Density') +
+  ylab('DAH')
+```
+
+```{r echo=FALSE, results='hide'}
+## ******************************************************************** ##
+## ANCOVA of DAH vs Plot Density (cont), Site (cat), and Year (cat)
+## ******************************************************************** ##
+summary(lm(data=fral.df.ann,formula=dah~plot.dens+site+obs.year))
+anova(lm(data=fral.df.ann,formula=dah~plot.dens+site+obs.year))
+#summary(lm(data=fral.df.ann,formula=dah~plot.dens*site*obs.year))
+```
+
+### Effect of plot density on fruit production
+
+```{r fruitMean,echo=FALSE}
+## ******************************************************************** ##
+## Mean fruit count per plant, grouped over years
+## ******************************************************************** ##
+
+## Mean fruit per plant, including plants with no fruit
+fruitMean <- mean(fral.df.ann$fruit,na.rm=TRUE)
+fruitSD <- sd(fral.df.ann$fruit,na.rm=TRUE)
+
+## Mean fruit per plant, **excluding** plants with no fruit
+fruitMean_Cond <- mean(subset(fral.df.ann,subset=fruit>0)$fruit,na.rm=TRUE)
+fruitSD_Cond <- sd(subset(fral.df.ann,subset=fruit>0)$fruit,na.rm=TRUE)
+```
+
+The number of fruit produced by individual *F. alnus* plants is known to
+vary greatly (Ref - Medan), and this was the case in my observations.
+However, for plants that produce fruit, the number of
+fruit was primarily fewer than fifty (Figure 3).
+Among all tagged plants, the mean number of fruit per plant was
+`r fruitMean` (Std. Dev. = `r fruitSD`). Considering only
+those tagged plants that did produce fruit, the mean fruit per plant was
+`r fruitMean_Cond` (Std. Dev. = `r fruitSD_Cond`).
+While individual *F. alnus* plants have been reported to produce several
+hundred to thousands of fruit (REF - Medan and Godwin), 
+and it has been reported that the success
+of *F. alnus* is likely due to high fecundity (REF???), in my field
+research I observed relatively small total fruit counts among 
+tagged plants (Table 4).
+
+```{r fruitDist, echo=FALSE, warning=FALSE,fig.keep='none'}
+## ******************************************************************** ##
+## Distribution of the number of fruit per plant, considering *all* plants (bin width =5)
+## ******************************************************************** ##
+ggplot(data=fral.df.ann,aes(x=fruit)) +
+  geom_histogram(binwidth=5) +
+  facet_grid(obs.year~.) +
+  xlab('Fruit Number')
+```
+
+```{r fruitDistSubset, echo=FALSE, warning=FALSE,fig.cap='Figure 3: Distribution of fruit number'}
+## ******************************************************************** ##
+## Distribution of the number of fruit per plant for only *fruiting* plants (bin width = 5)
+## ******************************************************************** ##
+ggplot(data=subset(fral.df.ann,subset=fruit>0),aes(x=fruit)) +
+  geom_histogram(binwidth=5) +
+  facet_grid(obs.year~.) +
+  xlab('Fruit Number')
+```
+
+```{r echo=FALSE}
+## ******************************************************************** ##
+## Total number of fruit per site, separated by year
+## ******************************************************************** ##
+fruit.summary <- ddply(.data=fral.df,
+                       .variables=c('site'),
+                       Fruit.2010=sum(fruit.2010,na.rm=TRUE),
+                       Fruit.2011=sum(fruit.2011,na.rm=TRUE),
+                       Fruit.2012.Summ=sum(fruit.summer.2012,na.rm=TRUE),
+                       Fruit.2012.Fall=sum(fruit.2012,na.rm=TRUE),
+                       Fruit.2012=sum(fruit.2012.max,na.rm=TRUE),
+                       summarize)
+print(fruit.summary)
+#pandoc.table(fruit.summary, style = "rmarkdown")
+## At EFF - how many trees have more than 100 fruit
+#length( which(subset(fral.df,subset=site=='eff')$fruit.2012.max > 100) )
+```
+
+|    Site     |  Fruit 2010  |  Fruit 2011  |  Fruit 2012 - Fall  |  Fruit 2012 - Max |
+|:-----------:|:------------:|:------------:|:-------------------:|:-----------------:|
+|     eff     |     108      |     276      |         4         |     1686     |
+|    tofa     |      0       |     898      |        274        |     274      |
+|     wff     |     270      |      80      |        782        |    1662      |
+| caleb_smith |      0       |      0       |         0         |      77      |
+|   sbu_sib   |      0       |      0       |         0         |      0       |
+| sbu_southp  |      0       |      0       |        11         |      36      |
+
+Table 4: Total fruit counts separated by year and site. 'Fruit 2012 - Max' represents
+the sum of the maximum fruit observation values from the summer and fall of 2012
+for each plant. At all sites, 'Fruit 2010', 'Fruit 2011', and 'Fruit 2012 - Fall'
+values were counted at each site within 2 weeks of each other, a year appart. 
+For example, at WFF 80 fruit were counted on all plants on October 25, 2011
+and 782 total fruit were counted on all plants on October 24, 2012.
+
+High fruit counts at East Foss Farm for 2012 were largely
+the result of a small number of high fruiting individuals 
+(five individuals produced over 100 fruit each). The low 
+fruit counts at SBU Sib for both 2011 and 2012 are due to
+the fact that these plants were observed *after* the fruiting season.
+Similarly, low fruit counts at WFF and Caleb Smith 
+in 2011 are also likely the result of late season observations.
+These late season observations were the results of unforeseen
+complications with scheduling of field observations. 
+The fruit counts for WFF and EFF were taken at similar times
+in 2010, 2011, and Fall of 2012 (within a two week window), as
+were fruit count as TOFA in 2011 and 2012. These observations
+suggest that there is substantial variability in either timing
+or amount of fruit set from year to year.
+
+Given the limitations of the fruit count data discussed above,
+to examine the relationship between plant size (DAH), plot density, 
+and fruit number, 
+I removed data collected
+at SBU-Sib from 2011 and 2012, SBU-SouthP 2011, and Caleb Smith 2011. At 
+each of these sites, data were collected after the fruiting season.
+I also removed plants that have a DAH of less than 0.5 cm, 
+as these plants are generally 
+too small to be reproductively active (REF). The minimum DAH for any fruiting plant
+I observed over the three years was 0.63 cm.
+
+```{r echo=FALSE}
+## Remove sites that were surveyed at times that were very late
+## in the fruiting season:
+## * sbu_sib 2010,2011
+## * other sites removed below
+fral.df.ann_UNFILT <- fral.df.ann
+## Apply filters
+# All plants with DAH = NA
+#fral.df.ann <- fral.df.ann[ -which(is.na(fral.df.ann$dah)), ]
+# DAH >= 0.5
+fral.df.ann <- fral.df.ann[ -which(fral.df.ann$dah < 0.5), ]
+# All sbu_sib plants
+fral.df.ann <- fral.df.ann[ -which(fral.df.ann$site == 'sbu_sib'), ]
+# Caleb Smith 2011
+fral.df.ann <- fral.df.ann[ -which(fral.df.ann$site=='caleb_smith' & fral.df.ann$obs.year=='2011'), ]
+# SBU SouthP 2011
+fral.df.ann <- fral.df.ann[ -which(fral.df.ann$site=='sbu_southp' & fral.df.ann$obs.year=='2011'), ]
+
+## Add a variable indication if the plant is fruiting or not
+fral.df.ann$fruiting <- fral.df.ann$fruit > 0
+fral.df.ann$fruiting <- ifelse(fral.df.ann$fruiting,yes='Fruiting',no='Not fruiting')
+
+## Of **all** of the plants, how many plants fruit versus not?
+length(which(fral.df.ann_UNFILT$fruit>0))
+length(which(fral.df.ann_UNFILT$fruit==0))
+length(which(fral.df.ann_UNFILT$fruit>0))/length(fral.df.ann_UNFILT$fruit)
+## Of plants likely to fruit
+length(which(fral.df.ann$fruiting==TRUE))
+length(which(fral.df.ann$fruiting==FALSE))
+length(which(fral.df.ann$fruiting==TRUE))/length(fral.df.ann$fruiting)
+```
+
+```{r echo=FALSE,message=FALSE,warning=FALSE, fig.cap='Figure 4: Fruit Count vs DAH, separated by year'}
+## ******************************************************************** ##
+## Fruit Count vs DAH, separated by year
+## ******************************************************************** ##
+ggplot(data=fral.df.ann,aes(x=dah,y=fruit)) +
+  geom_point() +
+  #stat_smooth() +
+  geom_smooth(method='glm',family='poisson') +
+  stat_smooth(col='red') +
+  xlab('DAH') +
+  ylab('Fruit Count')
+
+ggplot(data=fral.df.ann,aes(x=dah,y=fruit,colour=obs.year,shape=site)) +
+  geom_point() +
+  stat_smooth() +
+  xlab('DAH') +
+  ylab('Fruit Count')
+```
+
+```{r dahSizeClassvsFruit, echo=FALSE,fig.keep='none',message=FALSE,warning=FALSE}
+## ******************************************************************** ##
+## DAH Size Class versus Plant Fruit Count
+## ******************************************************************** ##
+## Plot DAH Cat by Fruit number
+ggplot(fral.df.ann,aes(x=dah.class,y=fruit)) +
+  geom_point() +
+  #geom_smooth(method='glm',family='poisson') +
+  stat_smooth() + # Loess smoothing
+  xlab('DAH Size Class') +
+  ylab('Fruit Count')
+```
+
+There is a clear pattern that in general
+larger *F. alnus* plants (as measured by DAH) 
+produce a greater number of fruit (Figure 4). However, 
+the data also indicate that the largest plants do not 
+necessarily produce the highest
+number of fruit. This is likely because the largest
+plants are the oldest plants, and plants tend to decrease in their
+fruit production as they approach senescence (REFS).
+
+#### Does density affect whether a plant fruits or not?
+
+Plot density has a weak, but significant, effect on whether a plant
+fruits or not (Logistic Regression, P < 0.001, coefficient estimate -0.006). 
+Examining the density plots of plot density, separated by whether a plant is 
+fruiting or not, this effect is not very apparent (Figure 5). 
+Looking at summary values for these data we see that mean plot density is
+generally larger, or nearly equivalent, for plants that did not fruit versus
+those that did (Table 5). Given the very small effect of plot density on whether a plant
+fruits or not (-0.006), I have chosen to ignore this effect, and instead
+focus only on the effect of plot density on the total number of fruit observed
+on a plant.
+
+```{r echo=FALSE,fig.cap='Figure 5 Density plots of plot density values, separated by whether an individual is fruiting or not. Line colors correspond to different sites'}
+## ******************************************************************** ##
+## Summary figures and statistics of Plot Density and Plant DAH 
+## separated by whether a plant is fruiting or not
+## ******************************************************************** ##
+ggplot(fral.df.ann,aes(x=plot.dens,colour=site)) + 
+  geom_density() +
+  facet_grid(fruiting~.) +
+  xlab('Plot Density (number of plants in plot)') +
+  ylab('Density')
+
+## Calc summary stats
+summary.fruitVSnofruit <- ddply(fral.df.ann,
+                                .variables=c('site','fruiting'),
+                                Mean.Dens=mean(plot.dens),
+                                SD.Dens=sd(plot.dens),
+                                Mean.DAH=mean(dah),
+                                SD.DAH=sd(dah),
+                                summarize)
+#panderOptions('table.split.table', 200)
+#pandoc.table(summary.fruitVSnofruit,style='rmarkdown')
+```
+
+|    Site     |   Fruiting Status  |  Mean Plot Dens  |  SD Plot Dens  |  Mean Plant DAH  |  SD Plant DAH  |
+|:-----------:|:------------:|:-----------:|:---------:|:----------:|:--------:|
+|     eff     |   Fruiting   |    12.42    |   6.656   |   1.866    |  0.9261  |
+|     eff     | Not fruiting |    12.01    |   6.793   |   0.8742   |  0.3265  |
+|    tofa     |   Fruiting   |    3.737    |   3.397   |   2.745    |  1.639   |
+|    tofa     | Not fruiting |    7.481    |   4.975   |   0.8867   |  0.4039  |
+|     wff     |   Fruiting   |    14.75    |   7.864   |   2.557    |  0.9288  |
+|     wff     | Not fruiting |    18.41    |   11.42   |   1.544    |  0.9823  |
+| caleb_smith |   Fruiting   |    12.7     |   11.27   |   2.152    |  0.7874  |
+| caleb_smith | Not fruiting |    16.04    |   13.9    |   0.9492   |  0.5428  |
+| sbu_southp  |   Fruiting   |      4      |   1.291   |    3.08    |  1.392   |
+| sbu_southp  | Not fruiting |    3.121    |   1.386   |   1.401    |   1.1    |
+
+Table 5: Summary statistics comparing Fruiting and Non-fruiting plants, and the
+plot density values in which plants are observed and mean DAH values.
+
+```{r logReg, echo=FALSE,message=FALSE,warning=FALSE,results='hide',fig.keep='none'}
+## Perform a Logistic Regression
+library(car)
+## Return fruiting back to logical
+fral.df.ann$fruiting <- fral.df.ann$fruit > 1
+
+scatterplotMatrix(~fruiting+plot.dens+site,data=fral.df.ann)
+
+fruiting.glm <- glm(formula=fruiting~plot.dens+site,data=fral.df.ann)
+#fruiting.glm <- glm(formula=fruiting~densEffect+site,data=fral.df.ann)
+vif(fruiting.glm)
+pp <- sum(resid(fruiting.glm,type="pearson")^2)
+1 - pchisq(pp, fruiting.glm$df.resid)
+
+influence.measures(fruiting.glm)
+pp/fruiting.glm$df.residual
+
+summary(fruiting.glm)
+#pander(fruiting.glm)
+```
+
+```{r echo=FALSE,fig.keep='none'} 
+## ******************************************************************** ##
+## Fruit Count vs Plot Density
+## ******************************************************************** ##
+
+ggplot(data=fral.df.ann,aes(x=plot.dens,y=fruit,colour=obs.year)) +
+  geom_point() +
+  geom_smooth(method='glm',family='poisson') +
+  xlab('Plot Density') +
+  ylab('Fruit Count')
+```
+
+```{r echo=FALSE,fig.keep='none'} 
+## ******************************************************************** ##
+## Fruit Count vs *Effective* Density
+## ******************************************************************** ##
+
+ggplot(data=fral.df.ann,aes(x=densEffect,y=fruit,colour=obs.year)) +
+  geom_point() +
+  geom_smooth(method='glm',family='poisson') +
+  xlab('Plant Effective Density') +
+  ylab('Fruit Count')
+```
+
+```{r echo=FALSE,results='hide'}
+## ******************************************************************** ##
+## Number of individual plants in each `dah.class`
+## ******************************************************************** ##
+table(fral.df.ann$dah.class)
+table(fral.df.ann$dah.superclass)
+```
+
+```{r echo=FALSE}
+## Based on the number of individuals in each class, and the species
+## biology, I grouped all members in `dah.class` 9-13 into class 8.
+
+## I classify plants by DAH sizes, based on 0.5 cm increments
+## up to 4 cm. Above this DAH, all plants will be in one class
+fral.df.ann$dah.class[which(fral.df.ann$dah.class>8)] <- 8
+```
+
+#### Does density effect the number of fruit produced by individual plants?
+
+I examined the effect of density on the number of fruit produced 
+by individual plants using Analysis of Covariance.
+As a response variable, I used log transformed fruit number, 
+adding 0.1 to the fruit number values before the transformation to avoid zeros.
+I treated DAH Size Class (described in
+**Density Dependence** above)
+as a categorical explanatory variable, 
+excluding all plants in the smallest size class. During three 
+years of field observations, I did not observe any individuals in this size
+class that produced fruit. 
+Two seperate sets of analyses were carried out using the two 
+different DAH classifications. For each,
+I ran three separate ANCOVAs, using one of the three density measures 
+described in **Density Dependence** as a continuous explanatory variable.
+Observations were grouped across sites, 
+because there were not enough observations along the three different density
+gradients to adequqtely estimate density dependent effects seperately at
+each site. 
+
+Categorizing plants into eight DAH Classes,
+the three analyses, each using a different measure of density, resulted
+in different patterns of density dependence effects (Figure 6). Using 
+the total number of plants in a plot as the measure of density (Plot Density),
+several DAH size classes appear to show an increase in the number of fruit as
+plot density increases. This observation suggests the role of
+positive density dependence, or Allee Effects. While there are potential
+biological explinations that to explain such effects, 
+I suspect this pattern is primarily driven by varying ecological conditions
+at the different sites. Using the Effective Density and DAH Effective Density
+measures, density appears to have a consistent negative effect on plant
+fruit number, with the exception of DAH size class 3 (1.5 to 2.0 cm DAH). 
+It should be noted that observations taken at EFF are included in
+analyses using *Plot Density* and *Effective Density*, but are excluded 
+from analyses using *DAH-Effective Density*, as these density values could not be 
+estimated. 
+
+```{r echo=FALSE}
+## Add a very small number to the fruit count so the log of this value is not 
+## -Inf
+fral.df.ann$fruit <- fral.df.ann$fruit + 0.1
+```
+
+Make a label function for the facet labels of the fruit count by density plots
+
+```{r}
+## create empty dah.class.char vector
+dah.class.char <- c()
+## write function to create dah.class.char
+dens_labeller <- function(dah.class,dah.class.char){
+  dah.class.char[dah.class=="0"] <- "< 0.5"
+  dah.class.char[dah.class=="1"] <- "0.5-1.0"
+  dah.class.char[dah.class=="2"] <- "1.0-1.5"
+  dah.class.char[dah.class=="3"] <- "1.5-2.0"
+  dah.class.char[dah.class=="4"] <- "2.0-2.5"
+  dah.class.char[dah.class=="5"] <- "2.5-3.0"
+  dah.class.char[dah.class=="6"] <- "3.0-3.5"
+  dah.class.char[dah.class=="7"] <- "3.5-4.0"
+  dah.class.char[dah.class=="8"] <- "> 4.0"
+  return(dah.class.char)
+}
+## Assign dah.class.char values
+fral.df.ann$dah.class.char <- dens_labeller(fral.df.ann$dah.class,dah.class.char)
+## Set the order of the facets
+fral.df.ann$dah.class.char <- factor(fral.df.ann$dah.class.char,
+                                     levels=c("< 0.5","0.5-1.0","1.0-1.5","1.5-2.0",
+                                              "2.0-2.5","2.5-3.0","3.0-3.5","3.5-4.0",
+                                              "> 4.0"))
+```
+
+
+```{r echo=FALSE,warning=FALSE,fig.cap='Figure 6: XY-scatter plots seperated by DAH Class'}
+### Plots of log(Fruit count) versus Plot density, separated by DAH categories
+d8_1 <- ggplot(fral.df.ann,aes(x=plot.dens,y=log(fruit))) +
+  geom_point(alpha=0.5) +
+  facet_wrap(~dah.class.char) +
+  xlab('Plot Density') +
+  ylab('Log(Fruit Count)') +
+  stat_smooth(method='lm') +
+  theme_bw()
+plot(d8_1)
+
+### Plots of log(Fruit count) versus *Effective* density, separated by DAH categories
+d8_2 <- ggplot(fral.df.ann,aes(x=densEffect.9class,y=log(fruit))) +
+  geom_point(alpha=0.5) +
+  facet_wrap(~dah.class.char) +
+  xlab('Effective Density') +
+  ylab('Log(Fruit Count)') +
+  stat_smooth(method='lm') +
+  theme_bw()
+plot(d8_2)
+
+### Plots of log(Fruit count) versus *DAH-Effective* density, separated by DAH categories
+d8_3 <- ggplot(fral.df.ann,aes(x=dens.dahEffect.9class,y=log(fruit))) +
+  geom_point(alpha=0.5) +
+  facet_wrap(~dah.class.char) +
+  xlab('DAH-Effective Density') +
+  ylab('Log(Fruit Count)') +
+  stat_smooth(method='lm') +
+  theme_bw()
+plot(d8_3)
+
+grid.arrange(d8_1,d8_2,d8_3,ncol=2,nrow=2)
+```
+
+
+```{r echo=FALSE,results='hide'}
+#### ANOVA investigating interactions between density measures and DAH size classes
+
+## Perform ANOVA to see if their is a signficant interaction
+## between plot density and DAH size class
+print('Plot Density')
+Anova(lm(log(fral.df.ann$fruit)~
+            factor(fral.df.ann$dah.class)*fral.df.ann$plot.dens),
+      type='III')
+print('Effective Density')
+Anova(lm(log(fral.df.ann$fruit)~
+            factor(fral.df.ann$dah.class)*fral.df.ann$densEffect.9class),
+      type='III')
+print('DAH-Effective Density')
+Anova(lm(log(fral.df.ann$fruit)~
+            factor(fral.df.ann$dah.class)*fral.df.ann$dens.dahEffect.9class),
+      type='III')
+
+```
+
+The inconsistant effect of density dependence estimated using the eight DAH
+size classes above makes it difficult to use these results to parameterize
+the effects of density dependence in my demographic model. Why do some size
+classes appear to have positive density dependent growth effects, while 
+others have negative effects? Negative density dependent growth affects
+have been observed for *F. alnus*, specifically relating to fruit number 
+(REF Medan). It is possible that positive density dependence effects are
+the result of the fact that plants will grow in clumps, i.e. localized 
+areas of high density. Godwin (REF) observed that the majority of fruit
+(1268 of 1804)
+on one particularly high fruiting individual plant dropped to the ground
+before being eaten by birds. Similar observations have been made for the 
+functionally closely related *Rhamnus cathartica* (Common buckthorn) (REF Knight).
+Such minimal amounts of dispersal may result in very clumped distributions of
+*F. alnus* on a landscape.
+However, while this analysis may suggest positive density dependence for some
+DAH size classes, this pattern is primarily driven by plants with 0 fruit at
+all density values. The majority of plants greater than 0.5 cm DAH produced
+no fruit (647 not fruiting versus 203 fruiting). There are several reasons 
+not related to density that may explain why I observed no fruit on a plant.
+First, some observations were taken later in the season than others, and fruit
+may have already dropped or been taken by birds. Second, some sites, and within 
+sites, some plots, have conditions more conducive to fruit production. Third, 
+there may be year-to-year variability within individuals not accounted for here.
+That is, if a plant produces a large amount of fruit one year, it may not produce
+as much the following year. 
+
+To address some of these issues, I used the DAH *Super* Class values 
+as the categorical explanatory variable in an ANCOVA similar to what was described
+above. I re-calculated Effective Density and DAH-Effective Density using the
+DAH Super Class values, and used these measures of density as the continuous
+explanatory variable in three separate analyses, as I did above. The effects of
+density are inconsistent when using the density measures of Plot Density and 
+DAH-Effective Density, however each stage shows negative density dependence using
+the density measure of Effective Density (Figure 7).
+Using measures of Effective Density (or
+DAH-Effective Density), rather than Plot Density, is justified by the fact that
+plants are generally highly affected by shading from other plants. Thus, equal sized
+or larger plants are likely to have a greater density dependent effect on an
+individual plant than smaller plants (although this may not be the case if there is
+extensive competition for below ground resources). 
+As in the ANCOVA using nine DAH Size 
+Classes, there are no observations from EFF used in the analysis with DAH-Effective
+Density. Given these two points, I have chosen to use the results from the ANCOVA
+of log( Fruit Number) explained by DAH Super Class and Effective Density to
+parameterize a model of density dependent effects on fruit number.
+
+Make a label function for the facet labels of the fruit count by density plots
+
+```{r}
+## create empty dah.class.char vector
+dah.supClass.char <- c()
+## write function to create dah.supClass.char
+dens_labeller <- function(dah.superclass,dah.supClass.char){
+  dah.supClass.char[dah.superclass=="A"] <- "< 0.5"
+  dah.supClass.char[dah.superclass=="B"] <- "0.5-2.0"
+  dah.supClass.char[dah.superclass=="C"] <- "2.0-3.5"
+  dah.supClass.char[dah.superclass=="D"] <- "> 3.5"
+  return(dah.supClass.char)
+}
+## Assign dah.supClass.char values
+fral.df.ann$dah.supClass.char <- dens_labeller(fral.df.ann$dah.superclass,dah.supClass.char)
+## Set the order of the facets
+fral.df.ann$dah.supClass.char <- factor(fral.df.ann$dah.supClass.char,
+                                     levels=c("< 0.5","0.5-2.0","2.0-3.5","> 3.5"))
+```
+
+```{r echo=FALSE,warning=FALSE,fig.cap='Figure __F__ XY-scatter plots seperated by DAH Super Class'}
+## Plots of log(Fruit count) versus Plot density, separated by DAH categories
+### Plots of log(Fruit count) versus Plot density, separated by DAH categories
+d3_1 <- ggplot(fral.df.ann,aes(x=plot.dens,y=log(fruit))) +
+  geom_point(alpha=0.5) +
+  facet_wrap(~dah.supClass.char) +
+  xlab('Plot Density') +
+  ylab('Log(Fruit Count)') +
+  stat_smooth(method='lm') +
+  theme_bw()
+print(d3_1)
+
+### Plots of log(Fruit count) versus *Effective* density, separated by DAH categories
+d3_2 <- ggplot(fral.df.ann,aes(x=densEffect,y=log(fruit))) +
+  geom_point(alpha=0.5) +
+  facet_wrap(~dah.supClass.char) +
+  xlab('Effective Density') +
+  ylab('Log(Fruit Count)') +
+  stat_smooth(method='lm') +
+  theme_bw()
+print(d3_2)
+
+## -------------------------------------------------------------------- ##
+## I checked that the results fo the stat_smooth above are equivelant
+## to the results of the ANCOVA model - they do look the same
+#p <- ggplot(data=cbind(fral.df.ann,pred=predict(fruit.by.dens.ancova)),
+#            aes(x=densEffect,y=log(fruit)))
+#p + geom_point(alpha=0.5) + 
+#  geom_line(aes(y=pred)) +
+#  facet_wrap(~dah.superclass)
+## -------------------------------------------------------------------- ##
+  
+### Plots of log(Fruit count) versus *DAH-Effective* density, separated by DAH categories
+d3_3 <- ggplot(fral.df.ann,aes(x=dens.dahEffect,y=log(fruit))) +
+  geom_point(alpha=0.5) +
+  facet_wrap(~dah.supClass.char) +
+  xlab('DAH-Effective Density') +
+  ylab('Log(Fruit Count)') +
+  stat_smooth(method='lm') +
+  theme_bw()
+print(d3_3)
+
+grid.arrange(d3_1,d3_2,d3_3,nrow=2,ncol=2)
+```
+
+
+```{r echo=FALSE,results='hide'}
+#### ANOVA investigating interactions between density measures and DAH size *super* classes
+
+## Perform ANOVA to see if their is a signficant interaction
+## between plot density and DAH size super class
+print('Plot Density')
+Anova(lm(log(fral.df.ann$fruit)~
+            factor(fral.df.ann$dah.superclass)*fral.df.ann$plot.dens),
+      type='III')
+print('Effective Density')
+Anova(lm(log(fral.df.ann$fruit)~
+            factor(fral.df.ann$dah.superclass)*fral.df.ann$densEffect),
+      type='III')
+print('DAH-Effective Density')
+Anova(lm(log(fral.df.ann$fruit)~
+            factor(fral.df.ann$dah.superclass)*fral.df.ann$dens.dahEffect),
+      type='III')
+
+```
+
+At the core of the density dependent function I used in my demographic model
+is the assumption of an exponential decline
+in the number of fruit produced by an individual plant as density
+increases. 
+Density dependence effects on fruit number were modeled separately for each 
+DAH class. Only three of the four classes were considered potentially 
+reproductively active and no model was parameterized for class A. An exponential 
+decline curve was used for each class, calculating the number of fruit produced
+as a function of Effective Density and three other parameters:
+
+$$
+\begin{aligned}
+F = a * \exp{( b * \frac{EffDens}{K})}
+\end{aligned}
+$$
+
+where $a$ is the number of fruit produced without any density effect,
+$b$ is a parameter governing the rate of exponential decline,
+$K$ is analogous to the population carrying capacity, and $EffDens$ is 
+the Effective Density of the size class being modeled.
+I estimated $a$ and $b$ using results from a full
+ANCOVA model (Table 6),
+in which slopes and intercepts were allowed to vary freely. For
+each size class I set $a$ as the exponent of the
+corresponding intercept value and $b$ as the slope for that size
+class in the ANCOVA model. $K$ was set *a priori* and is based on the population
+size and environmental conditions. 
+In this model, the carrying capacity ($K$) of a population is measured by
+the number of 2x2 m plots in the population. 
+$EffDens$ was calculated at each time step during runs of the demographic model. 
+
+
+| Parameter | Estimate | Std. Error | t value | P |
+|:-------:|:------:|:--------:|:-----:|:------:|
+|Size Class B: Intercept | -1.702 | 0.09842 | -17.29 | 1.375e-57 |
+|Size Class C: Intercept |  0.901 | 0.2328 | 11.18 | 3.705e-27 |
+|Size Class D: Intercept | 1.632 | 0.3478 | 9.586 | 9.946e-21 |
+|Size Class B: Slope | -0.005839 | 0.007915 | -0.7377 | 0.4609 |
+|Size Class C: Slope | -0.07356 | 0.03281 | -2.242 | 0.02524  |
+|Size Class D: Slope | -0.3441 | 0.2031 | -1.694 | 0.09064  |
+
+Table 6: Intercept and slope parameter estimates resulting from ANCOVA;
+$R^2$ = 0.2826, $F$ = 66.51, *df* = 5 and 844, p < 0.001.
+
+
+```{r echo=FALSE,fig.keep='none',results='hide'}
+#### Full ANCOVA Model
+## Use ANCOVA model
+fruit.by.dens.ancova <- 
+  #lm(log(fral.df.ann$fruit)~factor(fral.df.ann$dah.class)*fral.df.ann$dens.dahEffect)
+  #lm(log(fral.df.ann$fruit)~factor(fral.df.ann$dah.class)*fral.df.ann$densEffect.9class)
+  #lm(log(fral.df.ann$fruit)~factor(fral.df.ann$dah.class)*fral.df.ann$plot.densDAH)
+  lm(log(fral.df.ann$fruit)~factor(fral.df.ann$dah.superclass)*fral.df.ann$densEffect)
+  #lm(log(fral.df.ann$fruit)~factor(fral.df.ann$dah.superclass)*fral.df.ann$densEffect*fral.df.ann$site)
+
+## summary of model
+summary(fruit.by.dens.ancova)
+#panderOptions('table.split.table', Inf)
+#pander(fruit.by.dens.ancova)
+## Look at a few plots of the model fit
+# Q-Q Plot
+qqnorm(fruit.by.dens.ancova$res)
+# Histogram of residuals
+hist(fruit.by.dens.ancova$residuals,breaks=30)
+# Plot of residuals versus fitted values
+plot(fruit.by.dens.ancova$fitted.values,fruit.by.dens.ancova$residuals,
+     xlab="Fitted values",ylab="Residuals")
+# Plot fitted versus original values
+plot(log(fral.df.ann$fruit),fruit.by.dens.ancova$fitted.values,
+     xlab="Original values",ylab="Fitted values")
+## Odd values at 0, but I think that's to be expected with the transform
+```
+
+```{r echo=FALSE}
+## ANCOVA Notes
+# Note that using the `'*'` operator in defining a model allows for 
+# interactions between the factor (DAH class) and the plot density values.
+# Here I instead use the `'+'` operator, as I am only considering the mean effects
+# of the two explanatory variables. Thus, I am assuming that the interaction
+# term is negligible (i.e., that the slope value is the same for each
+# DAH class). Below is the results of this model.
+```
+
+
+```{r echo=FALSE}
+# ## Poisson Multiple Regression 
+# 
+# In addition to the ANCOVA method used above,
+# I examined the effects of plant DAH and plot density on plant fruit number using
+# Poisson regression. 
+```
+
+```{r poissonRegMods,warning=FALSE,echo=FALSE,results='hide'}
+## Poisson Regression, predictor variable = plot density 
+fruit.by.dens.pois <- glm(data=fral.df.ann,
+                          formula=fruit~plot.dens,#dah.yr0*dens.effect,
+                          family=poisson() )
+summary(fruit.by.dens.pois)
+
+## Poisson Regression, predictor variable = plant dah 
+fruit.by.dah.pois <- glm(data=fral.df.ann,
+                          formula=fruit~dah,
+                          family=poisson() )
+summary(fruit.by.dah.pois)
+
+## Poisson Regression, predictor variable = plot density + plant dah
+fruit.by.dens.dah.pois <- glm(data=fral.df.ann,
+                              formula=fruit~plot.dens+dah,
+                              family=poisson() )
+summary(fruit.by.dens.dah.pois)
+
+## Poisson Regression, predictor variable = plot density * plant dah
+## (Includes interaction effect)
+fruit.by.dens.dah.int.pois <- glm(data=fral.df.ann,
+                                  #formula=fruit~plot.dens*dah,
+                                  formula=fruit~densEffect*dah,
+                                  family=poisson() )
+summary(fruit.by.dens.dah.int.pois)
+```
+
+```{r echo=FALSE}
+## Commenting out section on Poisson Regression models
+# 
+# Above are four different Poisson Regression models. They differ in
+# the response variables used and whether an interaction effect is 
+# included.
+# 
+# * Examining the effects of plant DAH and plot density **separately**, plant
+# DAH has a positive effect on fruit number and plot density has a negative 
+# effect.
+# * Simultaneously accounting for both plant DAH and plot density **without** an
+# interaction effect, there is a significant effect of both 
+# plot density (negative) and plant DAH (positive).
+# * Simultaneously accounting for both plant DAH and plot density **and an interaction
+# effect**, there is a significant effect of plant DAH and plot density **and** a 
+# significant interaction term.
+# 
+# Looking at these results, I can make the claim that the Density affect
+# calculated here is similar to that calculated using the ANCOVA analysis
+# with the DAH-Effective density. However, the fruit count by DAH relationship
+# here overestimates the number of fruit for larger DAH plants. I believe 
+# this is because the Poisson regression does a poor job at extrapolating 
+# fruit count for large plants (Note that the LOESS analysis plateaus at around
+# 50 fruit for the largest plants).
+# A better fit might be achieved using a different
+# regression analysis.
+```
+
+#### Comparing fruit summary salues
+
+I calculated different fruit summary values, including
+the mean, median, SD, and mean of the log number of fruit for 
+each DAH size class, and comapred these values with those estiamted
+from the ANCOVA model (Table 7).
+The mean number of fruit values are much greater 
+than the other summary values, however these values are greatly 
+influenced by the small number of observations of plants with a
+large number of fruit.
+
+The exponent of the mean log number of fruit yielded values that 
+are very similar to the intercept values calculated using the 
+ANCOVA method, treating either plot density or effective DAH density
+as the continuous variables (and DAH size class as the categorical
+variable). This observation supports the use of the 
+intercept values as being representative of the number of fruit 
+produced by *F. alnus* plants.
+
+```{r echo=FALSE,fig.keep='none'}
+## Fruit Summary data.frame
+fruit.summary <- ddply(fral.df.ann,.variables=c('dah.class'),
+                       Mean.Fruit=mean(fruit),
+                       Median.Fruit=median(fruit),
+                       SD.Fruit=sd(fruit),
+                       Mean.Log.Fruit=mean(log(fruit)),
+                       summarize)
+fruit.summary$Exp.Mean.Log.Fruit <- exp(fruit.summary$Mean.Log.Fruit)
+#print(fruit.summary)
+#panderOptions('table.split.table', 200)
+#pandoc.table(fruit.summary,style='rmarkdown')
+
+
+ggplot(fral.df.ann,aes(x=log(fruit),colour=factor(dah.class))) + 
+  geom_density() #+ coord_cartesian(ylim=c(0,0.1))
+```
+
+|  DAH Class  |  Mean Fruit  |  Median Fruit  |  SD Fruit  |Mean (Log Fruit)  | Exp (Mean(Log Fruit))|
+|:-----------:|:------------:|:--------------:|:----------:|:----------------:|:--------------------:|
+|      1      |    0.2152    |      0.1       |   0.6592   |      -2.16       |        0.1153        |
+|      2      |    1.841     |      0.1       |   5.995    |      -1.364      |        0.2555        |
+|      3      |    3.336     |      0.1       |   8.199    |     -0.8246      |        0.4384        |
+|      4      |    7.185     |      1.1       |   12.57    |     -0.02875     |        0.9717        |
+|      5      |     19.6     |      4.1       |   37.88    |      0.8159      |        2.261         |
+|      6      |    17.68     |      3.1       |   28.24    |      0.9023      |        2.465         |
+|      7      |    43.45     |      6.6       |   85.41    |      1.666       |         5.29         |
+|      8      |    42.86     |      6.1       |   93.32    |      0.7743      |        2.169         |
+
+Table 7: DAH Class specific fruit summary values.
+
+***************************************************************
+***
+
+## Estimate *Frangula alnus* growth rate
+
+After cleaning, these data were combined into a single
+data set to calculate 
+Annual growth rates were calculated for all plants monitored for two
+or more years. 
+These data contain one observation per marked
+plant per year. Thus, a plant that was observed in 2010, 2011,
+and 2012 appears in this data set twice, once for the 2010 to 
+2011 transition and once for the 2011 to 2012 transition. For the
+purposes of calculating transitions, I have relabeled values of DAH 
+and Height as `dah.yr0` and `dah.yr1` (and similarly for height).
+
+```{r combineDataTran, echo=FALSE}
+## ******************************************************************** ##
+## Combine and Reshape Data
+## ******************************************************************** ##
+
+## Defind the new data.frame as fral.tran.df
+## ***
+# The following column names will be used
+fral.tran.names <- c('location','site','year1stTag','tag','plot',
+                     'dah.yr0','dah.yr1','dah.yr1.max',
+                     'height.yr0','height.yr1',
+                     'stems.yr0','stems.yr1',
+                     'yr0','dens.cont.yr0','densEffect.yr0',
+                     'dah.superclass.yr0',
+                     'mortality.yr1')
+# 2010 - 2011 transition data
+fral.tran.2010 <- data.frame(fral.df[c('location','site','year1stTag','tag','plot',
+                                       'dah.2010','dah.2011')],
+                             dah.yr1.max=NA,
+                             fral.df[c('height.2010','height.2011',
+                                       'basalStems.2010','basalStems.2011')],
+                             yr0=2010,
+                             fral.df[c('plot.dens.2010','densEffect.2010',
+                                       'dah.superclass.2010','mortality')]
+                             )
+names(fral.tran.2010) <- fral.tran.names
+# Remove any entries with NA for DAH in yr0 for 2010
+fral.tran.2010 <- fral.tran.2010[-(which(is.na(fral.tran.2010$dah.yr0))),]
+# 2011 - 2012 transition data
+fral.tran.2011 <- data.frame(fral.df[c('location','site','year1stTag','tag','plot',
+                                       'dah.2011','dah.2012','dah.2012.max')],
+                             fral.df[c('height.2011','height.2012',
+                                       'basalStems.2011','basalStems.2012')],
+                             yr0=2011,
+                             fral.df[c('plot.dens.2011','densEffect.2011',
+                                       'dah.superclass.2011','mortality')]
+                             )
+names(fral.tran.2011) <- fral.tran.names
+# Combine the two datasets
+fral.tran.df <- rbind( fral.tran.2010,
+                       fral.tran.2011)
+# Remove any entries with NA for DAH in yr0 and yr1
+fral.tran.df <- fral.tran.df[-(which(is.na(fral.tran.df$dah.yr0) & is.na(fral.tran.df$dah.yr1))),]
+# Fix mortality value 
+fral.tran.df$mortality.yr1[ which(fral.tran.df$mortality.yr1==1 & 
+                                    !is.na(fral.tran.df$dah.yr0) & 
+                                    !is.na(fral.tran.df$dah.yr1)) 
+                            ] <- 0
+# Clean up
+rm(fral.tran.2010,fral.tran.2011,fral.tran.names)
+```
+
+
+```{r writeNewData, echo=FALSE, results='hide',fig.keep='none'}
+## Write the new data.frame as a csv in 'outputs'
+write.csv(fral.tran.df,file=paste(FRAL_DEMOG_DIR,'outputs/fral.tran.df.csv',sep=''),
+          row.names=FALSE,quote=FALSE)
+```
+
+### Relationship Between DAH and Height
+
+Height was measured as a catagorical variable above 400 cm. The
+two categories were between 400 and 450 and greater than 450.
+I observed very few *F. alnus* plants above 450 cm in height 
+(23 of 990 observations).
+There was a verify strong relationship between
+DAH and Height.
+I examined deviations from this relationship as possible
+outliers.
+
+```{r dah_vs_height, echo=FALSE, warning=FALSE}
+## ******************************************************************** ##
+## Plot these combined data
+## ******************************************************************** ##
+
+## DAH vs Height
+## ***
+## As a data check, plot DAH vs Height
+ggplot( fral.tran.df, aes(x=dah.yr0,y=height.yr0,shape=factor(yr0)) ) +
+  geom_point() +
+  scale_shape_manual(values=c(1, 4)) +
+  labs(shape='Observation Year')
+## Plot these points in base R to using `identify`
+#plot(fral.tran.df$dah.yr0,fral.tran.df$height.yr0)
+#identify(fral.tran.df$dah.yr0,fral.tran.df$height.yr0,labels=fral.tran.df$tag)
+
+## ******************************************************************** ##
+## Notes
+## ******************************************************************** ##
+# There are still a few outliers, but I've checked them at this 
+# point, and they all seem OK. Some may have incorrect heights, 
+# but because I'm using DAH as a size measure, I'm not concerned
+# about them.
+## ******************************************************************** ##
+
+```
+
+Examine relationship between all DAH and Height measurements
+
+```{r}
+# Make new data.frame
+dah_height_df <- data.frame(
+  dah = c(fral.df$dah.2010,fral.df$dah.2011,fral.df$dah.2012.mod),
+  height = c(fral.df$height.2010,fral.df$height.2011,fral.df$height.2012)
+)
+
+# Remove all plants greater than 400 cm height
+length(which(dah_height_df$height>400))
+dah_height_df <- dah_height_df[ -which(dah_height_df$height>400), ]
+
+# Calculate Pearson's correlation coefficient
+cor(dah_height_df$dah, dah_height_df$height, use="complete.obs")
+cor.test(dah_height_df$dah, dah_height_df$height,na.rm=TRUE)
+```
+
+I estimated the rate of growth in DAH between observation periods.
+
+```{r fig.width=10, echo=FALSE, fig.keep='none',results='hide', warning=FALSE}
+## ******************************************************************** ##
+## Growth transition: Change in DAH
+## ******************************************************************** ##
+## The first transition examined is the change in DAH
+## from one season to the next. 
+
+## How many plants were tagged and followed from 2010 to 2011?
+## Only plants in UNH and WMNF locations were tagged in 2010. I am not
+## currently using the WMNF data because these plants were mowed by
+## the forest service. However, I do have a small number of plants
+## that I was able to measure DAH for in 2011 at this location.
+print('Number of plants tagged in 2010 at UNH location')
+length(which(!is.na(unh$dah2010.cm))) # 182
+
+## Plot the DAH transitions
+ggplot(fral.tran.df, aes(x=dah.yr0,y=dah.yr1)) +
+  geom_point() +
+  geom_abline(intercept=0,slope=1,colour='red') 
+
+## Fit a linear regression to these data
+fral.dah.tran.lm <- lm(data=fral.tran.df,
+                       formula=dah.yr1~dah.yr0)
+summary(fral.dah.tran.lm)
+## Beta value for this regression is 0.985, which seems to imply that
+## plants get smaller.
+```
+
+**Linear regression of DAH at year 1 on DAH at year 0**
+
+```{r echo=FALSE, warning=FALSE}
+## Use the max dah values observed
+fral.tran.df$dah.yr1.mod <- ifelse(is.na(fral.tran.df$dah.yr1.max),
+                                   yes=fral.tran.df$dah.yr1,
+                                   no=fral.tran.df$dah.yr1.max)
+
+## Plot the modified DAH transitions
+ggplot(fral.tran.df, aes(x=dah.yr0,y=dah.yr1.mod,#)) +
+                         colour=factor(yr0))) + #,
+                         #colour=as.factor(plot.dens.cat.yr0))) +
+  geom_point() +
+  geom_abline(intercept=0,slope=1,colour='red') +
+  #labs(colour='Plot Density Category') +
+  xlab('DAH (cm) at time t') +
+  ylab('DAH (cm) at time t+1') +
+  #stat_smooth()
+  geom_smooth(method='lm') 
+  #xlim(0,2) +
+  #ylim(0,3)
+
+## Plot the modified DAH transitions, faceted by site
+ggplot(fral.tran.df, aes(x=dah.yr0,y=dah.yr1.mod)) + #,
+                         #colour=as.factor(plot.dens.cat.yr0))) +
+  geom_point() +
+  geom_abline(intercept=0,slope=1,colour='black') +
+  geom_smooth(method='lm') +
+  labs(colour='Plot Density Category') +
+  xlab('DAH YR0') +
+  ylab('DAH YR1')  +
+  facet_grid(site~.)
+
+## Plot the modified DAH transitions, faceted by superclass
+ggplot(fral.tran.df, aes(x=dah.yr0,y=dah.yr1.mod)) + #,
+                         #colour=as.factor(plot.dens.cat.yr0))) +
+  geom_point() +
+  geom_abline(intercept=0,slope=1,colour='black') +
+  geom_smooth(method='lm') +
+  labs(colour='Plot Density Category') +
+  xlab('DAH YR0') +
+  ylab('DAH YR1')  +
+  facet_grid(dah.superclass.yr0~.)
+```
+
+Using the **loess** fit provided in ggplot, it looks like the growth rate
+for the smallest plants is greater than that for the larger plants.
+
+### Perform an ANCOVA to determine if there is a significant difference in slopes among sites.
+
+```{r tranACOVA, echo=FALSE}
+## Perform an ANCOVA to determine if there is a significant
+## difference in slopes
+Anova(lm(data=fral.tran.df,formula=dah.yr1.mod~dah.yr0 * site),type='III')
+summary(lm(data=fral.tran.df,formula=dah.yr1.mod~dah.yr0 * site))
+
+## Does year make a difference?
+Anova(lm(data=fral.tran.df,formula=dah.yr1.mod~dah.yr0 * as.factor(yr0)),type='III')
+summary(lm(data=fral.tran.df,formula=dah.yr1.mod~factor(yr0) * dah.yr0) )
+
+
+## Fitting the lines seperately
+summary(lm(data=fral.tran.df,formula=dah.yr1.mod~factor(yr0)/dah.yr0 -1) )
+## Calculate CV for slopes
+sd(c(1.080507,1.025743))/mean(c(1.080507,1.025743))
+
+
+# If I assume only additive effects, then year does have
+# a significant effect. 
+```
+
+
+### Fit linear regression models to the growth data both ignoring, and accounting for, plot density
+
+**Ignoring plot density**
+
+```{r tranLM, echo=FALSE}
+## Fit a linear regression to these data (modified)
+fral.dah.tranMod.lm <- lm(data=fral.tran.df,
+                       formula=dah.yr1.mod~dah.yr0)
+summary(fral.dah.tranMod.lm)
+#plot(fral.dah.tranMod.lm)
+## In this case, Beta = 1.035, perhaps a bit more realistic
+
+## Test model removing point 988 (row 981)
+fral.dah.tranMod.lm2 <- lm(data=fral.tran.df[-981,],
+                       formula=dah.yr1.mod~dah.yr0)
+summary(fral.dah.tranMod.lm2)
+#plot(fral.dah.tranMod.lm2)
+## It is a bit better, but probably not enough to warrant removal of the point
+
+```
+
+**Including density**
+
+```{r echo=FALSE}
+## Fit a linear regression to plotDens cat = 0 data
+fral.dah.tranMod.dens.lm <- lm(data=fral.tran.df,
+                       formula=dah.yr1.mod~dah.yr0+densEffect.yr0)
+summary(fral.dah.tranMod.dens.lm)
+## In this case, Beta_DAH = 1.023
+```
+
+**ANCOVA - Including density and DAH Superclass**
+
+```{r echo=FALSE}
+## Fit a linear regression to plotDens cat = 0 data
+fral.dah.tranMod.dens.lm <- lm(data=fral.tran.df,
+                       formula=dah.yr1.mod~dah.yr0*densEffect.yr0*dah.superclass.yr0)
+summary(fral.dah.tranMod.dens.lm)
+## In this case, Beta_DAH = 1.023
+```
+
+
+```{r echo=FALSE}
+## Clean up
+rm(fral.dah.tranMod.densCat.0.lm,fral.dah.tranMod.densCat.1.lm,fral.dah.tran.lm)
+```
+
+### Notes on density effects on growth transitions
+
+Effective density has a small, but significant effect on the growth rate.
+The beta value was -0.0018.
+
+Below I have a plot
+showing $\Delta$ DAH versus plot density, which shows that there is a greater
+change in DAH for plants in lower density plots. This relationship is **very**
+weak though. Also, this relationship is not consistent if I separate $\Delta$ DAH
+values by the size of the plant associated with those values.
+
+### $\Delta$ DAH to Size relationship
+
+```{r echo=FALSE,warning=FALSE}
+## Calculate the delta DAH
+fral.tran.df$dah.delta <- fral.tran.df$dah.yr1.mod - fral.tran.df$dah.yr0
+
+## Write fral.tran.df to file
+write.csv(fral.tran.df,file=paste(FRAL_DEMOG_DIR,'outputs/fral_dah_transitions.csv',sep=''),
+          row.names=FALSE,quote=FALSE)
+
+## Plot these values
+ggplot(fral.tran.df,aes(x=dah.yr0,y=dah.delta,shape=factor(yr0))) + #site,shape=factor(yr0))) +
+  geom_point() +
+  scale_shape_manual(values=c(1, 4)) +
+  stat_smooth(method='lm')
+```
+
+### $\Delta$ DAH versus plot density
+
+```{r echo=FALSE, warning=FALSE}
+ggplot(fral.tran.df,aes(x=densEffect.yr0,y=dah.delta, #)) +
+                        colour=dah.superclass.yr0)) +
+  geom_point() +
+  geom_smooth(method='lm')
+  #geom_smooth(method='glm',family=gaussian(link='log'),start=c(1,0))
+
+summary(lm(fral.tran.df$dah.delta~fral.tran.df$densEffect.yr0))
+# Try anvoca model
+summary(lm(fral.tran.df$dah.delta~fral.tran.df$densEffect.yr0*fral.tran.df$dah.superclass.yr0))
+
+ggplot(fral.tran.df,aes(x=dens.cont.yr0,y=dah.delta,colour=factor(dah.yr0%/%1))) +
+  geom_point() +
+  geom_smooth(method='lm') +
+  labs(colour='DAH Size Class')
+
+```
+
+## Ordered $\Delta$ DAH for Each Individual Tagged Plant
+
+This plot shows the change in DAH for each marked plant. Note
+that some plants have been removed because DAH is recorded as NA
+either in yr0 or yr1. The red dots indicate
+DAH at yr0.
+
+```{r deltaDAH, echo=FALSE, warning=FALSE}
+# Make an orderd transition matrix
+fral.tran.ordered <- fral.tran.df[order(fral.tran.df$dah.yr0,decreasing=TRUE),]
+ggplot() + 
+  geom_segment(data=fral.tran.ordered,
+                        aes(x=dah.yr0,xend=dah.yr1,
+                            y=1:length(dah.yr0),
+                            yend=1:length(dah.yr1))) + #,colour=as.factor(plot.dens.cat.yr0))) +
+  geom_segment(data=fral.tran.ordered,
+                        aes(x=dah.yr0,xend=dah.yr0+0.02,
+                            y=1:length(dah.yr0),yend=1:length(dah.yr1),colour='red')) +
+  xlab('DAH (cm)') +
+  ylab('Individual Plants') +
+  theme_bw() +
+  theme(legend.position="none")#,axis.title.x = element_text(size=20))
+
+ggsave(filename='figures/DAH_Growth.pdf',width=8,height=8,units='in')
+
+## Clean up
+rm(fral.tran.ordered)
+```
+
+***************************************************************************
+
+## Calculate Survival/Mortality Measures
+
+In general, I observed very little mortality of marked and measured 
+plants over the three field seasons. I have some measures
+of seedling mortality within a single growing season, as well as some measures
+of seedling mortality between 2011 and 2012.
+
+
+### Mortality of marked and measured plants
+
+Of the plants that were marked and measured over the three field seasons,
+there were 5 observed mortalities. This is a conservative number, given
+that there were some plants that were not found in years after they
+were first marked, which likely were no observed because of mortality.
+
+```{r mortality}
+## Determine the tags that correspond to the confirmed observed mortalities
+mort.tags <- fral.df$tag[which(!is.na(fral.df$mortality))]
+
+## Convert NAs to 0 for mortality
+fral.tran.df$mortality.yr1[is.na(fral.tran.df$mortality.yr1)] <- 0
+## Calcualte survival
+fral.tran.df$survival.yr1 <- 1-fral.tran.df$mortality.yr1
+
+## Plot DAH in yr0 versus mortality
+sp1 <- ggplot(data=fral.tran.df,aes(x=dah.yr0,y=survival.yr1)) +
+  geom_point() +
+  xlab('DAH yr0') +
+  ylab('Survival probability: high estimate') +
+  annotate("text",x=1,y=.1,label="A",size=15) +
+  geom_smooth(method='glm',family='binomial')
+print(sp1)
+```
+
+### Perform logistic regression using conservative mortality/survival data
+
+```{r survLogRegression}
+## Perform logistic regression
+surv.reg <- glm(survival.yr1~dah.yr0,data=fral.tran.df,
+                family=binomial())
+summary(surv.reg)
+
+## Estimate r^2 (based on Logan 2010 pp 501)
+1 - surv.reg$dev/surv.reg$null.deviance
+
+```
+
+### Survival/Mortality assuming that all missing plants were the results of mortality
+
+```{r mortalityHighEstimate, fig.width=10}
+## Assume that if DAH in yr1 is NA, then there was a mortality
+fral.tran.df$mortality.yr1.HighEst <- 0
+fral.tran.df$mortality.yr1.HighEst[which(is.na(fral.tran.df$dah.yr1))] <- 1
+
+## How many are we *assuming* died
+length(which(is.na(fral.tran.df$dah.yr1)))
+
+## Calcualte low survival estimate
+fral.tran.df$survival.yr1.LowEst <- 1-fral.tran.df$mortality.yr1.HighEst
+
+## Plot DAH in yr0 versus mortality
+sp2 <- ggplot(data=fral.tran.df,aes(x=dah.yr0,y=survival.yr1.LowEst)) +
+  geom_point() +
+  xlab('DAH yr0') +
+  ylab('Survival probability: low estimate') +
+  annotate("text",x=1,y=.1,label="B",size=15) +
+  #geom_jitter(height=0.01,width=0.01) +
+  geom_smooth(method='glm',family='binomial')
+print(sp2)
+
+## Plot DAH in yr0 versus mortality
+ggplot(data=fral.tran.df,aes(x=dah.yr0,y=survival.yr1.LowEst, #)) +
+                             colour=densEffect.yr0)) +
+  geom_point(alpha=0.4) +
+  #geom_jitter(height=0.01,width=0.01) +
+  geom_smooth(method='glm',family='binomial') +
+  labs(colour='Effective Density')
+
+## Perform logistic regression
+survLow.reg <- glm(survival.yr1.LowEst~dah.yr0,data=fral.tran.df,
+                family=binomial())
+summary(survLow.reg)
+
+## Estimate r^2 (based on Logan 2010 pp 501)
+1 - survLow.reg$dev/survLow.reg$null.deviance
+
+```
+
+```{r}
+## Borrowed code from http://www.r-bloggers.com/combining-ggplot-images/
+vp.layout <- function(x, y) viewport(layout.pos.row=x, layout.pos.col=y)
+arrange <- function(..., nrow=NULL, ncol=NULL, as.table=FALSE) {
+  dots <- list(...)
+  n <- length(dots)
+  if(is.null(nrow) & is.null(ncol)) { nrow = floor(n/2) ; ncol = ceiling(n/nrow)}
+  if(is.null(nrow)) { nrow = ceiling(n/ncol)}
+  if(is.null(ncol)) { ncol = ceiling(n/nrow)}
+  ## NOTE see n2mfrow in grDevices for possible alternative
+  grid.newpage()
+  pushViewport(viewport(layout=grid.layout(nrow,ncol) ) )
+  ii.p <- 1
+  for(ii.row in seq(1, nrow)){
+    ii.table.row <- ii.row
+    if(as.table) {ii.table.row <- nrow - ii.table.row + 1}
+    for(ii.col in seq(1, ncol)){
+      ii.table <- ii.p
+      if(ii.p > n) break
+      print(dots[[ii.table]], vp=vp.layout(ii.table.row, ii.col))
+      ii.p <- ii.p + 1
+    }
+  }
+}
+
+arrange(sp1,sp2)
+```
+
+```{r echo=FALSE,results='hide',fig.keep='none'}
+## Seedlings marked in 2011, but not measured, that were measured in 2012
+seedlings <- which(fral.df$year1stTag==2011 & is.na(fral.df$dah.2011))
+
+```
+
+```{r echo=FALSE}
+## Clean up
+rm(mort.tags)
+```
+
+*************************************************************
+
+Examining Seed Bank Data 
+========================================================
+
+During the summer of 2011 I manipulated 10 plots at UNH-West Foss Farm and
+10 plots at LI-Caleb Smith in an attempt to examine affects of seed bank
+dynamics on *Frangula alnus* (Glossy buckthorn) population dynamics.
+The manipulation was as following:
+
+* I randomly chose 10 lat/long points each, contained within the 
+two previously established study areas.
+* I went to each point using a Garmin GPS.
+* At that points, I established a 1x1 meter plot in which the side
+of the plot was parallel to the magnetic North-South direction.
+* I cleared the plot of all plant material using a Council Fire Rake.
+Larger plants were cut at their base. All plant material was discarded
+nearby. 
+* The cleared 1x1 m plot was separated into four quadrats. Opposite 
+quadrats were selected at random and covered with landscaping cloth.
+
+These plots were setup at UNH-West Foss Farm on 17 & 18 AUG 2011 and
+at LI-Caleb Smith on 24 AUG 2011.
+
+On 7 MAY 2012 and 24 MAY 2012 I returned to UNH-WFF and LI-CS, respectively,
+and removed the landscape cloth. I counted all emerging seedlings in all 
+of the quadrats. Seedlings were tagged with a small plastic tag to facilitate
+counting at a later time. The collected data have mostly been transferred 
+from my field notebooks into the Excel file:
+`/Users/mlammens/Dropbox/F-Alnus/Field-Work`
+
+Here I am documenting the steps I am taking to make this data set usable
+in R for further analysis.
+
+## Seed bank CSV File
+
+I wrote a CSV file in the Chapter 5 Project folder, 
+subfolder `/data` named `FRAL_seedbank_plots.csv` that 
+contains the values location, site, plot, Aug. 2011 notes, and May 2012 notes. As originally written,
+each plot is represented in a single row, but I want to separate these
+out into four rows per plot based on the quadrats.
+
+R Code Off
+```
+# Read in csv
+seedbank <- read.csv('data/FRAL_seedbank_plots.csv')
+# Define a vector of quadrat names
+quad.names <- c('NE','NW','SW','SE')
+# Create a data.frame in which each row from seedbank is repeated
+# four times.
+seedbank.full <- seedbank[ rep(row.names(seedbank), each=4),1:3 ]
+# Combine this data.frame with a column of the quadrat names
+seedbank.full <- data.frame(seedbank.full,quadrat=rep(quad.names,20))
+# Now write this new data.frame out as a csv file, replacing the 
+# original csv file.
+write.csv(seedbank.full,'data//FRAL_seedbank_seedlingCnt.csv',quote=FALSE,
+          row.names=FALSE)
+```
+
+## Seedling Counts
+
+Using the `seedbank.full` file, I manually set the quadrats that 
+were covered or not, and the number of seedlings found in each quadrat
+during survey periods. There were two survey periods for UNH-WFF and three
+survey periods for LI-CS. 
+
+For UNH-WFF, survey periods were:
+
+* 7 May 2012: All covered quadrats were uncovered and any seedlings were
+counted and tagged with a white plastic clip.
+* 24 Oct 2012: All quadrats were examined to see if white plastic clips
+were still present and to count the total number of seedlings in the quadrat.
+**No new seedlings were tagged at this time**
+
+For LI-CS, survey periods were:
+
+* 24 May 2012: All covered quadrats were uncovered and any seedlings were
+counted and tagged with a white plastic clip.
+* 27 Jun 2012: All quadrats were examined for a second time. Some tags were
+recovered (no longer attached, presumably because the seedling died). Any new
+seedlings were tagged with a white plastic clip.
+* __ Nov 2012: All quadrats were examined to see if white plastic clips
+were still present and to count the total number of seedlings in the quadrat.
+**No new seedlings were tagged at this time**
+
+I added the above seedling counts to the CSV file manually, based on
+field notes in my field notebooks and from field data sheets. My field
+data sheets have also been scanned, and a digital copy is here:
+`/Users/mlammens/Dropbox/F-Alnus/Field-Work`
+
+## Using the new data set
+
+### Change NAs to 0
+
+Here I read-in and manipulate this data set. One important manipulation I do
+here is to make all NA values equal to 0. This is to make calculations easier.
+Technically, if value in the data set is NA, it is because either I did not 
+make a related observation or that variable was not collected at all. An
+example of the latter is the NAs for the `seedlingCnt.jun.2012` values for 
+UNH-WFF. I did not collect any such values from UNH-WFF, only from LI-CS.
+However, for the purposes of calculating various metrics, it is far easier if
+this values are 0s.
+
+```{r}
+# Read seedbank_seedling csv
+seedbank <- read.csv(paste(FRAL_DEMOG_DIR,'data/FRAL_seedbank_seedlingCnt.csv',sep=''))
+# Make all NA values equal to 0.
+# Be careful using `replace` here, because it could change
+# factorial columns to numbers, or some other error. I checked 
+# that it worked here.
+seedbank <- replace(seedbank,is.na(seedbank),0)
+```
+
+### Calculate mean seedling count for covered vs. uncovered quadrats
+
+Here covered is a value of 0 or 1, where 0 = uncovered and 1 = covered.
+
+```{r}
+# Require plyr
+require(plyr)
+
+# Mean seedling count for covered vs. uncovered - May 2012
+ddply(.data=seedbank,.variable=c('covered'),fun=mean(seedlingCnt.may.2012),summarize)
+
+# Mean seedling count for covered vs. uncovered - Fall 2012
+ddply(.data=seedbank,.variable=c('covered'),fun=mean(seedlingCnt.fall.2012),summarize)
+```
+
+### Calculate mean seedling count for covered vs. uncovered quadrats separately for WFF and CS
+
+```{r}
+# Mean seedling count for cov. vs. uncov. - May 2012 - WFF and CS separately
+ddply(.data=seedbank,.variable=c('covered','site'),fun=mean(seedlingCnt.may.2012),summarize)
+
+# Mean seedling count for cov. vs. uncov. - Fall 2012 - WFF and CS separately
+ddply(.data=seedbank,.variable=c('covered','site'),fun=mean(seedlingCnt.fall.2012),summarize)
+```
+
+### Calculate the mortality rate for the seed bank plots
+
+Basing this on the number of **tagged** seedlings where the tags were later recovered
+
+```{r}
+# divide the `may.to.fall.2012.mortality` by the sum of 
+# `seedlingCnt.may.2012` and `seedlingCnt.jun.2012`
+# Note that I'm removing the tags that were missing, assuming
+# that I cannot classify them as dead or alive
+seedling.mortality.plot <- seedbank$may.to.fall.2012.mortality /
+  (seedbank$seedlingCnt.may.2012+seedbank$seedlingCnt.jun.2012-seedbank$may.to.fall.2012.missing)
+# Calcualte the mean value
+seedling.withinYear.mort <- mean(seedling.mortality.plot,na.rm=TRUE)
+seedling.withinYear.mort.SD <- sd(seedling.mortality.plot,na.rm=TRUE)
+print(seedling.withinYear.mort)
+print(seedling.withinYear.mort.SD)
+```
+
+```{r echo=FALSE}
+# Clean up
+#rm(seed.subplot.df,seedbank,seedling.mortality.plot)
+```
+
+******************************************************
+
+# IPM Construction
+
+To construct an IPM for *F. alnus* I am following the example laid out
+in Cory Merow et al.'s guide to IPMs, Appendix A. Some of the code here
+is adapted from the example code included in this appendix.
+
+I constructed an IPM with both continuous and discrete structure.
+
+```{r}
+## Setup a data.frame to store all of the model parameters in
+params=data.frame(
+  surv.int=NA, # Intercept from logistic regression of survival data
+  surv.slope=NA, # Slope from logistic regression of survival data
+  growth.int=NA, # Intercept from linear regression of growth/shrinkage/stasis data
+  growth.slope=NA, # Slope from linear regression of growth/shrinkage/stasis data
+  growth.sd=NA, # Standard deviation of the residuals from the linear regression of growth/shrinkage/stasis data
+  #fruit.int=NA, #Intercept from Poisson regression of fruit produced
+  #fruit.slope=NA,#Slope from Poisson regression of fruit produced
+  #recruit.size.meanlog=NA, # Mean recruit size
+  #recruit.size.sdlog=NA, #Standard deviation of recruit size
+  establishment.prob=NA #Probability of establishment - see below for explination
+  )
+
+```
+
+### Survival Estimate
+
+I calculated survival above, censoring plants that were not found
+in later years, as opposed to treating these plants as mortality events.
+As a high mortality/ low survival estimate I will later build a model
+assuming *Not Found* plants are mortality events.
+
+```{r}
+#params$surv.int=coefficients(surv.reg)[1]
+#params$surv.slope=coefficients(surv.reg)[2]
+params$surv.int=coefficients(survLow.reg)[1]
+params$surv.slope=coefficients(survLow.reg)[2]
+```
+
+### Plant Growth
+
+I am measuring growth as an increase in DAH. There is some indication that
+there may be density dependent growth, but at this time, I am not including 
+this effect.
+
+```{r}
+params$growth.int <- coefficients(fral.dah.tranMod.lm)[1]
+params$growth.slope <- coefficients(fral.dah.tranMod.lm)[2]
+params$growth.sd <- sd(resid(fral.dah.tranMod.lm))
+```
+
+### Plant Fecundity
+
+This is a composite term that includes the following factors:
+
+* Number of fruit produced by a plant
+* Number of seeds per fruit
+* Probability that a seed germinates, becoming a seedling 
+* Probability that a seedling survives to survey time
+
+The number of fruit produced per plant was measured in the field
+and appears to be density dependent. I am modeling that with an
+ANCOVA model.
+
+I'm currently using a value based on Berg 2010, of 2.1
+
+The probability that a seed germinates can be estimated based on a number of studies, 
+and is currently set at 0.26 based on Adams 1926.
+
+The probability that a seedling survives during the season was estimated
+based on data collected for my seed bank plots.
+
+#### 1. Set seeds per plant values
+
+```{r eval=FALSE}
+#params$fruit.int <- coefficients(seed.reg)[1]
+#params$fruit.slope <- coefficients(seed.reg)[2]
+```
+
+#### 2. Determine size distribution of recruits
+
+```{r fig.keep='last'}
+## Recruits are seedlings that were tagged in 2012 
+recruits <- fral.df[which(fral.df$year1stTag==2012 & !is.na(fral.df$dah.2012.mod)),]
+## Remove anything that is greater than 0.5 DAH, as these are plants
+## missed in previous years
+recruits <- recruits[ -which(recruits$dah.2012>0.5), ]
+## Size distribution of recruits
+ggplot(recruits,aes(x=dah.2012.mod)) +
+  geom_histogram(binwidth=0.01) 
+## The distribution appears pretty close to log-normal
+meanlog <- mean(log(recruits$dah.2012.mod))
+sdlog <- sd(log(recruits$dah.2012.mod))
+## Test this distribution
+x.vals <- seq(min(recruits$dah.2012.mod),max(recruits$dah.2012.mod),length=100)
+y.vals <- dlnorm(x.vals, meanlog, sdlog )
+recruitDens <- data.frame(x=x.vals,y=y.vals)
+## Plot density distribution with log-normal fit
+ggplot(recruits,aes(x=dah.2012.mod)) +
+  geom_histogram(binwidth=0.01,aes(y=..density..)) +
+  geom_line(data=recruitDens,aes(x=x,y=y),colour='red')
+```
+
+#### 3. Parameterize these parts of the model
+
+Currently this is not being used in my model. I am assuming
+that all seedlings establish only in the first size class
+
+```{r}
+#params$recruit.size.meanlog <- meanlog
+#params$recruit.size.sdlog <- sdlog
+```
+
+#### 4. Calculate establishment value 
+
+```{r}
+## Seeds per fruit calculated from Berg 2011
+tot.2.seeds.per.fruit <- 371+194+78+10
+tot.3.seeds.per.fruit <- 50+20+2+0
+tot.seeds <- (2*tot.2.seeds.per.fruit) + (3*tot.3.seeds.per.fruit)
+tot.fruit <- tot.2.seeds.per.fruit+tot.3.seeds.per.fruit
+seeds.per.fruit <- tot.seeds/tot.fruit
+## Another measure of seeds per fruit was provided by 
+## Kylie Martinod at UConn
+#seeds.per.fruit <- 2.66
+#seeds.per.fruit.SD <- 0.47
+
+seed.germination.rate <- 0.26 # From Adams 1926
+seedling.withinYear.Surv <- 1 - seedling.withinYear.mort
+## As written, this is not exactly a probability 
+params$establishment.prob <-
+  seeds.per.fruit * seed.germination.rate * seedling.withinYear.Surv
+```
+
+### Define life-history functions
+
+```{r}
+## Survival - as a logistic function
+s.x <- function(x,params) {
+  u <- exp(params$surv.int + params$surv.slope*x)
+  return(u/(1+u))
+}
+
+## Growth
+g.yx <- function(xp,x,params) {
+  dnorm(xp,mean=params$growth.int+params$growth.slope*x,sd=params$growth.sd)
+}
+
+## Fecundity 
+## -- This function assumes that I'm using the ANCOVA
+## -- results using DAH super class as a categorical predictor
+f.yx <- function(x,params,ancova.fit) {
+  fruit.by.class <- coefficients(ancova.fit)[1] + coefficients(ancova.fit)[2:3]
+  fruit.by.class <- c(coefficients(ancova.fit)[1],fruit.by.class)
+  fruit.by.class <- exp(fruit.by.class)
+  fruit.by.class <- c(0,fruit.by.class)
+  fruit.by.class <- unname(fruit.by.class)
+  
+  # Assign density independent fruit values to each size class
+  frt <- x*0
+  frt[x<0.5] <- fruit.by.class[1]
+  frt[(x>=0.5 & x<2)] <- fruit.by.class[2]
+  frt[(x>=2 & x<3.5)] <- fruit.by.class[3]
+  frt[(x>=3.5)] <- fruit.by.class[4]
+  
+  # Apply establishment probability
+  fec <- frt * params$establishment.prob
+  
+  # Return fecundity vector
+  return(fec)
+}
+```
+
+### Make the Kernel
+
+```{r}
+## Set bounds and grid
+min.dah <- .8*min(fral.df.ann_UNFILT$dah,na.rm=TRUE)
+#max.dah <- 6
+max.dah <- 1.1*max(fral.df.ann_UNFILT$dah,na.rm=TRUE)
+n <- 50#30 # Number of cells in the kernal (i.e., stages)
+b <- min.dah + c(0:n)*((max.dah-min.dah)/n) # Boundary Points
+y <- 0.5*(b[1:n] + b[2:(n+1)]) # Mesh points
+h <- y[2]-y[1]
+
+## Make kernels
+## -------------------------------------------------------------------- ##
+# Survival-Growth kernel
+# Growth
+G <- h*outer(y,y,g.yx,params=params)
+# Because of approximations, some columns sum to a value
+# greater than 1. I can fix this by rescaling the columns 
+# with sum gt 1
+G.gt.1 <- which(colSums(G)>1)
+# NB: I'm using a trick of transposing the matrix and relying
+# on R's internal handling of dividing a matrix by a vector
+G[,G.gt.1] <- t( t(G[,G.gt.1])/colSums(G)[G.gt.1] )
+
+# Survival
+S <- s.x(y,params=params)
+# Set S[1] = same survival as stage 1 -> stage 2. 
+# This will only be used for the first couple of row elements,
+# while the rest of the row repsents
+# establishment rate, which is accounted for in the Fecundity
+# function
+S[1] <- seedling.betweenYr.surv
+# Manually set survival of seedlings (stage 1 -> stage 2)
+#S[2] <- seedling.betweenYr.surv
+# Combine surivial and growth
+P <- G
+for( i in 1:n) { P[,i]<-G[,i]*S[i] }
+
+# Set some of the matrix values to 0, as they're 
+# not biologically reasonable.
+P[which(P<1e-5)] <- 0
+# Also set elements of the first Row associated with feconudity 
+# to 0
+P[1,which(y>0.5)] <- 0
+
+# Fecundity kernel
+Fec.row1 <- f.yx(y,params,fruit.by.dens.ancova)
+# Make a fecundity matrix to add to the Growth-Survival matrix
+Fec <- P*0
+Fec[1,] <- Fec.row1
+
+# Combine Surivial-Growth and Fecundity kernels
+K=P+Fec
+
+eigen(K)$values[1]
+```
+
+
+### Make the new mp file using 'mp.read' and 'mp.write' functions
+
+```
+## I need some of the code from the SA scripts
+source('~/Dropbox/Scripts-Programs/SA-Code/sensitivity.setup.r')
+sensitivity.setup('~/Dropbox/Scripts-Programs/SA-Code/')
+
+#fral.mp <- mp.read('ramas/Frangula.mp')
+fral.mp <- mp.read('ramas/fral_template.mp')
+#fral.mp <- mp.read('ramas/fral_template_30.mp')
+fral.mp <- fral.mp$mp.file
+fral.mp$Stages <- 50
+fral.mp$StMatr[[1]]$Matr <- K
+fral.mp$SDMatr[[1]]$Matr <- K*0
+fral.mp$ConstraintsMatr <- K*0+1
+fral.mp$ConstraintsMatr[1,which(y>0.5)] <- 0
+fral.mp$Cat1EffMat <- K*0
+fral.mp$Cat2EffMat <- K*0
+## -------------------------------------------------------------------- ##
+#stage.prop <- fral.mp$StProp
+#stg.props <- rep(stage.prop[1],times=50)
+#for ( st.num in 1:length(stg.props) ){
+#  stg.props[[st.num]]$StName <- paste('Stage',st.num)
+#}
+#fral.mp$StProp <- stg.props
+## -------------------------------------------------------------------- ##
+mp.write(mp.new=fral.mp,version=51,mp.new.file='ramas/fral_new.mp')
+        
+print( 'Converting *.mp file to Windows format' )
+system( paste(sens.base.dir,'nix2win.sh ','ramas/fral_new.mp', sep="") )
+
+```
+
+```
+## Development work to make a *.mp file 
+## Here, I previously ran Fral_Demog_Explore.Rmd from the 
+## 'fruit_effect_dens' branch (git)
+
+fral.mp <- mp.read('ramas/fral_plotDens.mp')
+#fral.mp <- mp.read('ramas/fral_dahDensEffect.mp')
+#fral.mp <- mp.read('ramas/fral_DensEffect_SuperClass.mp')
+fral.mp <- fral.mp$mp.file
+
+## Making Stage weights
+StgWeights <- (y/2)^2
+StgWeights <- ((y/2)^2)/max((y/2)^2)
+## Convert StProp into a data.frame
+StProp.df <- ldply(fral.mp$StProp,data.frame)
+head(StProp.df)
+## Replace StWeight column
+StProp.df$StWeight <- StgWeights
+## Convert back to a list of lists
+fral.mp$StProp <- apply(X=StProp.df,MARGIN=1,FUN=as.list)
+
+## Also change fecundity values while I'm working with the mp file
+fruit <- fruit.by.size.2(dah=y)
+fec <- fruit*seedling.withinYear.Surv*seed.germination.rate*seeds.per.fruit
+fral.mp$StMatr[[1]]$Matr[1,] <- fec
+
+#mp.write(mp.new=fral.mp,version=51,mp.new.file='ramas/fral_dahEffect.mp')
+mp.write(mp.new=fral.mp,version=51,mp.new.file='ramas/fral_dahDensEffect.mp')
+```
+
+```
+## Fruit dev work
+y
+frt.A <- 0
+frt.B <- 0.18
+frt.C <- 2.5
+frt.D <- 5.1
+fruit <- ifelse(y < 0.5,yes=frt.A,no=0)
+fruit <- ifelse(y >= 0.5,yes=frt.B,no=fruit)
+fruit <- ifelse(y >= 2,yes=frt.C,no=fruit)
+fruit <- ifelse(y >= 3.5,yes=frt.D,no=fruit)
+fec <- fruit*seedling.withinYear.Surv*seed.germination.rate*seeds.per.fruit
+fral.mp$StMatr[[1]]$Matr[1,] <- fec
+mp.write(mp.new=fral.mp,version=51,mp.new.file='ramas/fral_DensEffect_SuperClass.mp')
+
+## Make a slope (b) vector
+bb <- ifelse(y < 0.5,yes=0,no=0)
+bb <- ifelse(y >= 0.5,yes=-0.006,no=bb)
+bb <- ifelse(y >= 2,yes=-0.074,no=bb)
+bb <- ifelse(y >= 3.5,yes=-0.344,no=bb)
+
+Stage_df <- data.frame(Stage = 1:50, DAH = y, Slope = bb)
+write.csv(Stage_df,'~/Desktop/FRAL_Stage_Slopes.csv',quote=FALSE,row.names=FALSE)
+print(Stage_df)
+```
+
+### Steps taken to construct spatially explicit *F. alnus* models
+
+After the above model was constructed for a single population, I use the results
+from a species distribution model (SDM) to inform the spatial structure for a 
+metapopulation of *F. alnus* throughout the invaded range, and through time from 
+1910 to 2010. The methods and scripts used to construct the spatial model can be 
+found in 
+`/Users/mlammens/Dropbox/F-Alnus/Chapter-4`. 
+This work was going to be a chapter on its own, but I've it with the demographic model 
+to make a single thesis chapter (i.e., Chapter 4). 
+
+The following is a brief description of this process:
+
+1. I constructed an SDM for *F. alnus* using all records from 1960 to 2010, using
+aggregated bioclimatic and land-use layers for this time period.
+2. I examined various model parameters to tune the 50-year SDM to determine a final
+set of parameters to use for a new SDM.
+3. A new SDM was created using predictor variables that were 10-year aggregate layers.
+Each occurence records was matched to a 10-yr aggregate for the dynamic variables. Background
+was sampled from 10-yr aggregates proportional to the number of occurence records from that
+time period. 
+4. The 10-yr aggregate SDM result was used to project habitat suitability for each 
+10-yr aggregate layer. 
+5. The RAMAS GIS program was used to convert from HS layers to a spatial structure
+for a metapopulation model. 
+  a. First a single PTC file was created for 1910
+  b. I used the MakeSeries.exe program to create and run PTC files for all time points
+  Some modifications were required to make this runable on Mac OS X, rather than windows.
+  c. The MakeSeries.exe also constructed a HabDyn file, which was exectued once all of the
+  PTC files were run.
+  d. The result of the HabDyn simulation was a new fral.MP file, with a spatial structure.
+6. After the new MP files were created, I changed the dispersal distance function and
+the correlation distance function to create a new mp file with higher estimates of both
+of these functions (called fralhi.mp).
+7. Next I created TWO more mp files, again with high and low dispersal and correlation
+values, but now setting density dependence to user defined (DLL). 
+8. I also added Template **Translocation Management Actions**, which I'm going to use to
+simulate random Long Distance Dispersal events (LDD). I deal extensively with Translocation
+**outside** of the SA methods (see `fral_generage_popmanage.R`).
+9. I used the RAMAS Metapop GUI to make SD matrices based on the best estimates for 
+Survival and Fecundity. I did using the autofill function with 5% and 15% CV.
+
+9. After these steps, I changed other values for a number of key MP parameters. The
+scripts used to make these changes are in `fral_misc_demog.R`, and include setting intial
+abundance values for populations that were reported as occupied as early as 1910.
+
+## Make plot for Chapter 4
+
+I want a four panell plot:
+1. Survival
+2. Growth
+3. Fecundity
+4. IPM Kernel 
+
+```{r}
+# 1. Survival
+# -----------
+# Plot DAH in yr0 versus mortality. Note that here I'm
+# plotting only the low survival estimate
+surv_panel <- 
+  ggplot(data=fral.tran.df,aes(x=dah.yr0,y=survival.yr1.LowEst)) +
+  geom_point() +
+  xlab('DAH (cm) at time t') +
+  ylab('Probability of survival to time t+1') +
+  geom_smooth(method='glm',family='binomial') +
+  ggtitle('Survival') +
+  theme_bw() +
+  theme( text=element_text( size=12, family="Times") )
+print(surv_panel)
+
+# 2. Growth
+# ---------
+# Based on transitions
+growth_panel <- 
+  ggplot(fral.tran.df, aes(x=dah.yr0,y=dah.yr1.mod)) + 
+  geom_point() +
+  geom_abline(intercept=0,slope=1,colour='red') +
+  xlab('DAH (cm) at time t') +
+  ylab('DAH (cm) at time t+1') +
+  geom_smooth(method='lm') +
+  ggtitle('Growth: size transitions') +
+  theme_bw() +
+  theme( text=element_text( size=12, family="Times") )
+
+
+
+# 3. Fruit count based on plot density
+# ------------------------------------
+# ANOVA plots of log(Fruit count) versus *Effective* density, 
+# separated by DAH categories
+fruit_panel <- 
+  ggplot(fral.df.ann,aes(x=densEffect,y=log(fruit))) +
+  geom_point(alpha=0.5) +
+  facet_wrap(~dah.supClass.char) +
+  xlab('Effective Density') +
+  ylab('Log(Fruit Count)') +
+  stat_smooth(method='lm') +
+  ggtitle('Fruit count by size and\n effective plot density') +
+  theme_bw() +
+  theme( text=element_text( size=12, family="Times") )
+print(fruit_panel)
+
+# 4. IPM Kernel / Matrix
+# ----------------------
+# Make a tile plot of the IPM kernel
+K_melt <- melt(K)
+names(K_melt) <- c('t1','t0','Rate')
+kernel_panel <-
+  ggplot(K_melt,aes(x=t0,y=t1,fill=Rate)) +
+  geom_tile() +
+  scale_fill_gradient(low="white",high="red") +
+  scale_y_reverse() +
+  xlab('Stage at time t') +
+  ylab('Stage at time t+1') +
+  theme_bw() + 
+  ggtitle('IPM kernel') + 
+  theme(legend.justification=c(0,0), legend.position=c(0,0),
+        text=element_text( size=12, family="Times") ) 
+print(kernel_panel)
+
+# Combine plots into a single figure and print
+#pdf('figures/Model_Figure.pdf',width=7.5,height=7.5)
+pdf("figures/Diss_Fig_4_1.pdf", width=6.5, height=6.5)
+model_figure <- 
+  grid.arrange(surv_panel,growth_panel,fruit_panel,kernel_panel,ncol=2,nrow=2)
+dev.off()
+
+
+## -------------------------------------------------------------------- ##
+## Make figures for defense talk and presentation
+
+# Survival
+ggplot(data=fral.tran.df,aes(x=dah.yr0,y=survival.yr1.LowEst)) +
+  geom_point() +
+  xlab('DAH (cm) at time t') +
+  ylab('Probability of survival to time t+1') +
+  geom_smooth(method='glm',family='binomial') +
+  ggtitle('Survival') +
+  theme_bw() +
+  theme( text=element_text( size=20, face="bold" ) )
+ggsave( "figures/Pres_Fig_Survival.pdf", width=5, height=5, units="in" )
+
+# Size transition
+ggplot(fral.tran.df, aes(x=dah.yr0,y=dah.yr1.mod)) + 
+  geom_point() +
+  geom_abline(intercept=0,slope=1,colour='red') +
+  xlab('DAH (cm) at time t') +
+  ylab('DAH (cm) at time t+1') +
+  geom_smooth(method='lm') +
+  ggtitle('Growth: size transitions') +
+  theme_bw() +
+  theme( text=element_text( size=20, face="bold" ) )
+ggsave( "figures/Pres_Fig_Growth.pdf", width=5, height=5, units="in" )
+
+# Fecundity
+ggplot(fral.df.ann,aes(x=densEffect,y=log(fruit))) +
+  geom_point(alpha=0.5) +
+  facet_wrap(~dah.supClass.char) +
+  xlab('Effective Density') +
+  ylab('Log(Fruit Count)') +
+  stat_smooth(method='lm') +
+  ggtitle('Fruit count by size and\n effective plot density') +
+  theme_bw() +
+  theme( text=element_text( size=20, face="bold") )
+ggsave( "figures/Pres_Fig_Fecund.pdf", width=9, height=5, units="in" )
+
+# Kernel
+ggplot(K_melt,aes(x=t0,y=t1,fill=Rate)) +
+  geom_tile() +
+  scale_fill_gradient(low="white",high="red") +
+  scale_y_reverse() +
+  xlab('Stage at time t') +
+  ylab('Stage at time t+1') +
+  theme_bw() + 
+  ggtitle('IPM kernel') + 
+  theme(#legend.justification=c(0,0), legend.position=c(0,0),
+        text=element_text( size=20, face="bold") ) 
+ggsave( "figures/Pres_Fig_Kernel.pdf", width=7, height=6, units="in" )
+
+
+```
+
+
+
+## Construct simple transition matrix
+
+This is for illistration purposes only!
+
+```{r, echo=FALSE, results='hide', warning=FALSE}
+## Make discrete stage categories
+## Seperate to < 0.5, 0.5 to 2.0, 2.0 to 3.5, > 3.5
+require( dplyr )
+
+fral_2011 <- table( fral.df$dah.superclass.2011 )
+
+tbl_2011_2012 <- table( fral.df$dah.superclass.2012, fral.df$dah.superclass.2011 )
+colSums( tbl_2011_2012 )
+rowSums( tbl_2011_2012 )
+
+#tbl_2011_2012 / as.vector( fral_2011 ) 
+m1 <- tbl_2011_2012 / rowSums( tbl_2011_2012 )
+m1[1,3] <- .5
+m1[1,4] <- 1
+
+tbl_2011_2012_8 <- table( fral.df$dah.class.2012, fral.df$dah.class.2011 )
+m2 <- tbl_2011_2012_8 / rowSums( tbl_2011_2012_8 )
+
+
+m2[1,12] <- 1
+m2[1,11] <- 1
+m2[1,8] <- .8
+m2[1,7] <- .6
+m2[1,6] <- .4
+
+
+ggplot( melt( m1 ) , 
+        aes(x=as.numeric(Var.2),
+            y=as.numeric(Var.1),
+            fill=value)) +
+  geom_tile() +
+  scale_fill_gradient(low="blue",high="red") +
+  scale_y_reverse() +
+  xlab('Size class at time t') +
+  ylab('Size class at time t+1') +
+  theme_bw() + 
+  theme( text=element_text( size=18, face="bold" ),
+         legend.position="none" )
+ggsave( filename="~/Desktop/m1.pdf", width=4, height=4, units="in" )
+
+ggplot( melt( m2 ) , 
+        aes(x=Var.2,y=Var.1,fill=value)) +
+  geom_tile() +
+  scale_fill_gradient(low="blue",high="red") +
+  scale_y_reverse() +
+  xlab('Size class at time t') +
+  ylab('Size class at time t+1') +
+  theme_bw() + 
+  theme( text=element_text( size=20, face="bold" ),
+         legend.position="none" )
+  #ggtitle('IPM kernel') + 
+#   theme(legend.justification=c(0,0), legend.position=c(0,0),
+#         text=element_text( size=20, face="bold") ) 
+ggsave( filename="~/Desktop/m2.pdf", width=4, height=4, units="in" )
+
+
+```
