@@ -4,3 +4,8 @@ tables/*
 .DS_Store
 */.DS_Store
 .Rproj.user
+scripts/figure/*
+scripts/*.md
+scripts/*html
+*Rproj
+outputs/*
