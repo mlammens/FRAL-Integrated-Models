@@ -10,7 +10,7 @@
 ## ******************************************************************** ##
 
 # Source fral_demog_setup.R file
-source('R/fral_demog_setup.R')
+source('scripts/fral_demog_setup.R')
 
 ## ******************************************************************** ##
 ## Read in patch raster and historical occurence records
@@ -24,13 +24,13 @@ source('R/fral_demog_setup.R')
 
 ## Read in patch id maps
 # patch_raster <- 'ramas/fral_patch.ASC'
-patch_raster <- "/Volumes/Garage/Projects/F-alnus/Chapter-5_ramas_folder/ramas/fral_patch.ASC"
+patch_raster <- "~/Dropbox/F-alnus/Chapter-5_ramas_folder/ramas/fral_patch.ASC"
 patch_ids <- raster(patch_raster)
 patch_total <- max(as.matrix(patch_ids))
 
 ## Get csv of occurence records through time. NB: using records in
 ## Lambert Equal Area projection.
-occurences <- read.csv('/Volumes/Garage/Projects/F-alnus/Chapter-5_ramas_folder/ramas/FRAL_Occurence_LAEA.csv')
+occurences <- read.csv('~/Dropbox/F-alnus/Chapter-5_ramas_folder/ramas/FRAL_Occurence_LAEA.csv')
 # Remove any occurences with no 'YEAR' information
 occurences <- occurences[ !is.na(occurences$YEAR), ]
 # Extract patch values for all occurence records
@@ -112,7 +112,7 @@ ggplot(cum_occ_hist_allPops_df,aes(x=Year,y=sqrt(CumOcc))) +
 ## ******************************************************************** ##
 ## NB: The associated data used in chapter 3 were converted from WGS84 to
 ## LAEA in QGIS. Here I am reading in the LAEA data.
-assoc_spec <- read.csv('/Volumes/Garage/Projects/F-alnus/Chapter-5_ramas_folder/ramas/Assoc_Occurence_LAEA.csv',as.is=TRUE)
+assoc_spec <- read.csv('~/Dropbox/F-alnus/Chapter-5_ramas_folder/ramas/Assoc_Occurence_LAEA.csv',as.is=TRUE)
 # Make Collection year a numeric value - this removes some vales
 assoc_spec$CllctnY <- as.numeric(assoc_spec$CllctnY)
 # Remove records with no Observation Data
@@ -218,3 +218,4 @@ cum_occ_all$Spec <- c(rep('fral',nrow(cum_occ_hist_allPops_df)),
 ggplot(cum_occ_all,aes(x=Year,y=sqrt(CumOcc),colour=Spec)) +
   geom_point() +
   theme_bw()
+
