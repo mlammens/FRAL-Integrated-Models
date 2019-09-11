@@ -273,7 +273,7 @@ if (extract_pop_sizes){
 
 ## Load saved 'cum_occupancy_mpMult' as needed
 # load('~/Dropbox/F-Alnus/Chapter-5_ramas_folder/ramas/cum_occupancy_mpMult_all_1.RData')
-# load('~/Dropbox/F-Alnus/Chapter-5_ramas_folder/ramas/cum_occupancy_mpMult_all_1000.RData')
+load('~/Dropbox/F-Alnus/Chapter-5_ramas_folder/ramas/cum_occupancy_mpMult_all_1000.RData')
 # load('~/Dropbox/F-Alnus/Chapter-5_ramas_folder/ramas/cum_occupancy_mpMult_all_2000.RData')
 
 ## ******************************************************************** ##

@@ -33,19 +33,19 @@ g_legend<-function(a.gplot){
 ## Plot Fecundity versus LDD (NumTranslocs)
 scatter <- ggplot() +
   geom_point(data=Sim_Results_DensEff_popd_LDD,
-             aes(x=Fec.Mean,y=NumTranslocs,shape=factor(sens_ppp_opt),colour=factor(sens_ppp_opt)), #colour=loss_bin),
+             aes(x=Fecundity,y=LDD,shape=factor(sens_ppp_opt),colour=factor(sens_ppp_opt)), #colour=loss_bin),
              size=4) +
   #scale_shape_manual(values=c(20,17)) +
   #geom_polygon( data=hull, aes(x=Fec.Mean,y=NumTranslocs), alpha=1, colour='black', fill=NA ) +
   theme_bw() +
   theme(legend.position='none') 
 fec_dens <- ggplot() +
-  geom_density(data=Sim_Results_DensEff_popd_LDD,aes(x=Fec.Mean,colour=factor(sens_ppp_opt))) + #colour=loss_bin)) +
+  geom_density(data=Sim_Results_DensEff_popd_LDD,aes(x=Fecundity,colour=factor(sens_ppp_opt))) + #colour=loss_bin)) +
   theme_bw() +
   theme(legend.position='none',
         axis.text.x=element_blank(), axis.title.x=element_blank()) 
 ldd_dens <- ggplot() +
-  geom_density(data=Sim_Results_DensEff_popd_LDD,aes(x=NumTranslocs,colour=factor(sens_ppp_opt))) + #colour=loss_bin)) +
+  geom_density(data=Sim_Results_DensEff_popd_LDD,aes(x=LDD,colour=factor(sens_ppp_opt))) + #colour=loss_bin)) +
   coord_flip() +
   theme_bw() +
   theme(legend.position='none',
@@ -58,7 +58,7 @@ ldd_dens <- ggplot() +
 
 # Get legend
 fec_dens_wLegend <- ggplot() +
-  geom_density(data=Sim_Results_DensEff_popd_LDD,aes(x=Fec.Mean,colour=factor(sens_ppp_opt))) #colour=loss_bin)) +
+  geom_density(data=Sim_Results_DensEff_popd_LDD,aes(x=Fecundity,colour=factor(sens_ppp_opt))) + #colour=loss_bin)) +
   theme_bw()
 legend <- g_legend(fec_dens_wLegend)
 
@@ -204,7 +204,7 @@ ggplot() +
          axis.text.y=element_blank(),
          axis.title.y=element_blank() )
 #ggsave(filename='figures/Prior_posterior_density_1k_sens_ppp_opt.pdf',width=7.5,height=7.5)
-ggsave(filename='figures/Diss_Fig_4_13.pdf',width=6.5,height=6.5)
+# ggsave(filename='figures/Diss_Fig_4_13.pdf',width=6.5,height=6.5)
 
 ## -------------------------------------------------------------------- ##
 ## Make figure for presentation
@@ -220,7 +220,7 @@ ggplot() +
          axis.ticks.y=element_blank(),
          axis.text.y=element_blank(),
          axis.title.y=element_blank() )
-ggsave(filename='figures/Pres_Fig_Prior_posterior_density_1k_sens_ppp_opt_Fecundity.pdf',width=5.5,height=5.5)
+# ggsave(filename='figures/Pres_Fig_Prior_posterior_density_1k_sens_ppp_opt_Fecundity.pdf',width=5.5,height=5.5)
 
 
 
@@ -237,7 +237,7 @@ ggplot() +
          axis.ticks.y=element_blank(),
          axis.text.y=element_blank(),
          axis.title.y=element_blank() )
-ggsave(filename='figures/Pres_Fig_Prior_posterior_density_1k_sens_ppp_opt.pdf',width=7.5,height=7.5)
+# ggsave(filename='figures/Pres_Fig_Prior_posterior_density_1k_sens_ppp_opt.pdf',width=7.5,height=7.5)
 
 
 ## Also make a plot of the differences between kch scenarios
@@ -253,7 +253,7 @@ ggplot() +
   theme( text=element_text( size=18 ),
          axis.title.x=element_blank(),
          legend.position = "none" )
-ggsave(filename='figures/Pres_Fig_Prior_posterior_density_1k_sens_ppp_opt_K.pdf',width=2.5,height=2.5)
+# ggsave(filename='figures/Pres_Fig_Prior_posterior_density_1k_sens_ppp_opt_K.pdf',width=2.5,height=2.5)
 
   
 
@@ -369,19 +369,21 @@ Sim_Results_DensEff$loss_cat_char <- factor( Sim_Results_DensEff$loss_cat_char,
 
 ## Mean historical sensitivity versus mean simulation sensitivity
 ggplot(subset( Sim_Results_DensEff, subset=popd=='popd_LDD' ),
-       aes(x=hist_sens_obsgrd,y=sim_sens_obsgrd,shape=loss_cat_char)) + 
+       aes(x=hist_sens_obsgrd,y=sim_sens_obsgrd,color=as.factor(sens_ppp_opt))) + 
   geom_point(size=2) +
   #geom_hline(yintercept=0.5) +
-  geom_vline(xintercept=0.5) +
-  geom_abline(intercept=(-0.1),slope=1) +
+  #geom_vline(xintercept=0.5) +
+  #geom_abline(intercept=(-0.1),slope=1) +
   xlab("Sensitivity") +
   ylab("Positive predictive power") +
-  scale_shape_discrete(name="Loss function\nvalue") +
+  scale_color_manual(name="Combined metric\nvalue", values = c("grey", "black")) +
   theme_bw() +
-  annotate("text", x=0.65, y=0.7, label="Combined metric = 1", family="Times") +
+  #annotate("text", x=0.65, y=0.7, label="Combined metric = 1", family="Times") +
+  coord_fixed(ratio = 1) +
   theme(text=element_text(size=12,family="Times",face="bold"))   
 #ggsave(filename='figures/Sensitivity_vs_PPP_popd_1k.pdf',width=7.5,height=7.5,units='in')
-ggsave(filename='figures/Diss_Fig_4_6.pdf',width=6.5,height=6.5,units='in')
+#ggsave(filename='figures/Diss_Fig_4_6.pdf',width=6.5,height=6.5,units='in')
+ggsave(filename='figures/Figure_PPP_Sens.pdf',width=6.5,height=6.5,units='in')
 
 ## -------------------------------------------------------------------- ##
 ## Make figure for presentation

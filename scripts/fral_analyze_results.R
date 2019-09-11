@@ -18,7 +18,7 @@
 ## ******************************************************************** ##
 
 ## Source the fral_demog_setup.R script to setup required functions
-source('R/fral_demog_setup.R')
+source('scripts/fral_demog_setup.R')
 
 ## Read in simulation results
 Sim_Results <- read.csv('outputs/sim_results_1000.csv')
@@ -180,7 +180,7 @@ ggplot( data=NULL, aes( x= Sim_Results_hsDiff_EffDens_Sens) ) +
   xlab( "Change in model sensitivity value") +
   theme_bw() +
   theme( text=element_text( size=18, face="bold" ) )
-ggsave(filename='figures/Pres_Fig_Sens_Compare_HS_change.pdf',width=5.5,height=5.5)
+# ggsave(filename='figures/Pres_Fig_Sens_Compare_HS_change.pdf',width=5.5,height=5.5)
 
 # PPP
 Sim_Results_hsDiff_EffDens_PPP <-
@@ -377,7 +377,7 @@ ggplot( data=NULL, aes( x= Sim_Results_hsDiff_EffDens_Sens,
   theme_bw() +
   theme( text=element_text( size=18, face="bold" ),
          legend.position = "none" )
-ggsave(filename='figures/Pres_Fig_Sens_Compare_HS_change.pdf',width=5.5,height=5.5)
+# ggsave(filename='figures/Pres_Fig_Sens_Compare_HS_change.pdf',width=5.5,height=5.5)
 
 
 
@@ -400,7 +400,7 @@ ggplot(melt(Sim_Results_DensEff_popd_LDD,measure.vars=names(Sim_Results)[ predic
   #geom_density(size=1) +
   facet_wrap(~variable,scales='free_x') +
   theme_bw()
-ggsave(filename='figures/Histogram_Predictor_Variables_NoClass.pdf',width=7.5,height=7.5)
+# ggsave(filename='figures/Histogram_Predictor_Variables_NoClass.pdf',width=7.5,height=7.5)
 
 ## Make a pairs plot for these data
 ggpairs( Sim_Results_DensEff_popd_LDD[ c(predictors,pred_cat) ] )
@@ -428,7 +428,7 @@ ggplot(melt(Sim_Results_DensEff_rand_LDD,measure.vars=names(Sim_Results)[predict
                       labels=c("gt3000","lt300") ) +
   theme_bw() +
   theme( legend.position=c(1,0), legend.justification=c(1,0) ) 
-ggsave(filename='figures/Histogram_Predictor_Variables_CumAOOLoss_BinClass.pdf',width=7.5,height=7.5)
+# ggsave(filename='figures/Histogram_Predictor_Variables_CumAOOLoss_BinClass.pdf',width=7.5,height=7.5)
 
 
 ## ******************************************************************** ##

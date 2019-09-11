@@ -29,27 +29,30 @@ require(dismo)
 
 ## External functions (i.e., Sensitivity Analysis functions)
 
-# Get node name of computer
-system_nodename <- tolower(Sys.info()['nodename'])
+# # Get node name of computer
+# system_nodename <- tolower(Sys.info()['nodename'])
+# 
+# # Change directories based on system node name
+# if (system_nodename=='chloe-pc'){
+#   source('/Users/plover/Dropbox/RA-Sensitivity/SACode_Sandbox/sensitivity.setup.r')
+#   sensitivity.setup('/Users/plover/Dropbox/RA-Sensitivity/SACode_Sandbox/')
+# } else if (system_nodename=='jessie-labpc') {
+#   ## Directories to use on Jessies-Lab computer
+#   source('/Users/jessie/Dropbox/RA-Sensitivity/SACode_Sandbox/sensitivity.setup.r')
+#   sensitivity.setup('/Users/jessie/Dropbox/RA-Sensitivity/SACode_Sandbox/')
+# } else if (system_nodename=='akcakaya-lab') {
+#   source('/Users/Matthew/My Documents/My Dropbox/RA-Sensitivity/SACode_Sandbox/sensitivity.setup.r')
+#   sensitivity.setup('/Users/Matthew/My Documents/My Dropbox/RA-Sensitivity/SACode_Sandbox/')
+# } else if (system_nodename=='protea') {
+#   source('/home/punctata/Dropbox/RA-Sensitivity/SACode_Sandbox/sensitivity.setup.r')
+#   sensitivity.setup('/home/punctata/Dropbox/RA-Sensitivity/SACode_Sandbox/')
+# } else { # Assume on MA-L MacBook Pro
+#   source('~/Dropbox/RA-Sensitivity/SACode_Sandbox/sensitivity.setup.r')
+#   sensitivity.setup('~/Dropbox/RA-Sensitivity/SACode_Sandbox/')
+# }
 
-# Change directories based on system node name
-if (system_nodename=='chloe-pc'){
-  source('/Users/plover/Dropbox/RA-Sensitivity/SACode_Sandbox/sensitivity.setup.r')
-  sensitivity.setup('/Users/plover/Dropbox/RA-Sensitivity/SACode_Sandbox/')
-} else if (system_nodename=='jessie-labpc') {
-  ## Directories to use on Jessies-Lab computer
-  source('/Users/jessie/Dropbox/RA-Sensitivity/SACode_Sandbox/sensitivity.setup.r')
-  sensitivity.setup('/Users/jessie/Dropbox/RA-Sensitivity/SACode_Sandbox/')
-} else if (system_nodename=='akcakaya-lab') {
-  source('/Users/Matthew/My Documents/My Dropbox/RA-Sensitivity/SACode_Sandbox/sensitivity.setup.r')
-  sensitivity.setup('/Users/Matthew/My Documents/My Dropbox/RA-Sensitivity/SACode_Sandbox/')
-} else if (system_nodename=='protea') {
-  source('/home/punctata/Dropbox/RA-Sensitivity/SACode_Sandbox/sensitivity.setup.r')
-  sensitivity.setup('/home/punctata/Dropbox/RA-Sensitivity/SACode_Sandbox/')
-} else { # Assume on MA-L MacBook Pro
-  source('~/Dropbox/RA-Sensitivity/SACode_Sandbox/sensitivity.setup.r')
-  sensitivity.setup('~/Dropbox/RA-Sensitivity/SACode_Sandbox/')
-}
+source('~/Dropbox/RA-Sensitivity/SACode_Sandbox/sensitivity.setup.r')
+sensitivity.setup('~/Dropbox/RA-Sensitivity/SACode_Sandbox/')
 
 
 ## ******************************************************************** ##
