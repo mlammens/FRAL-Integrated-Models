@@ -13,11 +13,11 @@
 ## ******************************************************************** ##
 
 ## Source the fral_demog_setup.R script to setup required functions
-source('R/fral_demog_setup.R')
+source('scripts/fral_demog_setup.R')
 
 ## Source the fral_historical_pattern.R script to compare historical
 ## occurences to simulated occurences
-source('R/fral_historical_pattern.R')
+source('scripts/fral_historical_pattern.R')
 
 ## -------------------------------------------------------------------- ##
 ## FUNCTION: Calculate simulation sensitivity
@@ -95,7 +95,7 @@ comp_sim_hist <- function(sim_pres,hist_pres,hist_occ_only=FALSE){
 
 # Get list of completed fral simulations 
 # fral_files <- list.files(path='ramas/',pattern='fral_.*SCL',full.names=TRUE)
-fral_files <- list.files(path='/Volumes/Garage/Projects/F-alnus/RAMAS_Models_Storage/',
+fral_files <- list.files(path='~/Dropbox/F-alnus/RAMAS_Models_Storage/',
                          pattern='fral_.*SCL',full.names=TRUE)
 fral_files <- sub(pattern='SCL',replacement='mp',x=fral_files)
 
@@ -272,9 +272,9 @@ if (extract_pop_sizes){
 ## ******************************************************************** ##
 
 ## Load saved 'cum_occupancy_mpMult' as needed
-#load('ramas/cum_occupancy_mpMult_all_1.RData')
-#load('ramas/cum_occupancy_mpMult_all_1000.RData')
-#load('ramas/cum_occupancy_mpMult_all_2000.RData')
+# load('~/Dropbox/F-Alnus/Chapter-5_ramas_folder/ramas/cum_occupancy_mpMult_all_1.RData')
+# load('~/Dropbox/F-Alnus/Chapter-5_ramas_folder/ramas/cum_occupancy_mpMult_all_1000.RData')
+# load('~/Dropbox/F-Alnus/Chapter-5_ramas_folder/ramas/cum_occupancy_mpMult_all_2000.RData')
 
 ## ******************************************************************** ##
 ## Caclulate population occurence overlap
