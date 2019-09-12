@@ -15,11 +15,11 @@
 ## ******************************************************************** ##
 
 ## Source the fral_demog_setup.R script to setup required functions
-source('R/fral_demog_setup.R')
+source('scripts/fral_demog_setup.R')
 
 ## Source the fral_historical_pattern.R script to compare historical
 ## occurences to simulated occurences
-source('R/fral_historical_pattern.R')
+source('scripts/fral_historical_pattern.R')
 
 ## ******************************************************************** ##
 ## ******************************************************************** ##
@@ -97,10 +97,13 @@ ggplot() +
   geom_line(data=cum_occ_hist_allPops_df[-1,],
             aes(x=Year,y=sqrt(CumOcc)),size=2) +
   scale_colour_discrete(name="Occupancy\nThreshold") +
+  geom_hline(yintercept=sqrt(974),colour="red",size=1.5) +
+  annotate("text", x=1920, y=sqrt(934),label="Max patches") +
   theme_bw() +
   theme(text=element_text(size=12,family="Times",face="bold")) 
 #ggsave(filename='figures/Cumulative_AOO_DensEff_PopD_allsims.pdf',width=7.5,height=7.5,units='in')
-ggsave(filename='figures/Diss_Fig_4_7.jpg',width=6.5,height=6.5,units='in')
+#ggsave(filename='figures/Diss_Fig_4_7.jpg',width=6.5,height=6.5,units='in')
+ggsave(filename='figures/Cumulative_AOO_DensEff_PopD_allsims.jpg',width=6.5,height=6.5,units='in')
 
 ## -------------------------------------------------------------------- ##
 ## Make plot for the defense talk
@@ -457,13 +460,16 @@ hist_sim_all_df_m$Year <- as.numeric(sub(pattern='.*\\.',replacement='',hist_sim
 ## Plots the GAM fitted curves, which show overall model fits
 ggplot(hist_sim_all_df_m[grepl(pattern='sens_hist',hist_sim_all_df_m$variable),],
        aes(x=Year,y=value)) + #,group=grouping,colour=factor(occ_threshold) )) +
-  #geom_line(aes(group=grouping,colour=factor(occ_threshold))) +
+  geom_line(aes(group=grouping,colour=factor(occ_threshold)), alpha=0.4 ) +
   #geom_point(aes(group=grouping,colour=factor(occ_threshold))) +
-  geom_smooth(aes(colour=factor(occ_threshold)),level=(1-1e-15) ) +
+  #geom_smooth(aes(colour=factor(occ_threshold)),level=(1-1e-15) ) +
+  scale_colour_discrete(name="Occupancy\nThreshold") +
   ylab('Sensitivity') +
   #guides(colour=FALSE) +
   #facet_grid(.~occ_threshold) +
-  theme_bw()
+  theme_bw() +
+  theme(text=element_text(size=12,family="Times",face="bold")) 
+ggsave(filename='figures/Sensitivity_DensEff_PopD_allsims.jpg',width=6.5,height=6.5,units='in')
 
 ## ******************************************************************** ##
 ## Make box plot figure for a few key years
