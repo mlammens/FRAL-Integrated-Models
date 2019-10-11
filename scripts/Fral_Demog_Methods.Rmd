@@ -799,6 +799,23 @@ print(fral.df_plot.dens[c('site','plot.dens.2011','plot.dens.2012')])
 #      MARGIN=2,
 #      FUN=mean)
 
+## Make a box plot of fral densities
+library(dplyr)
+fral.df_m_summary <-
+  fral.df_m %>%
+  group_by(site, plot, variable) %>%
+  summarise(pdens = unique(value))
+ggplot(fral.df_m_summary, aes(x = site, y = pdens, fill = variable)) +
+  geom_boxplot() +
+  ylab('Plants per Plot') +
+  xlab('Site') +
+  scale_fill_discrete( name='Observation\nYear',
+                       breaks=c('plot.dens.2010','plot.dens.2011','plot.dens.2012'),
+                       labels=c('2010','2011','2012') ) +
+  theme_bw()
+ggsave(filename = "../figures/Fig_A7.png", device = "png", width = 5.5, height = 4.5, units = "in")
+
+
 ## Make some bar plots
 # First melt the data.frame
 fral.df_plot.dens <- melt(fral.df_plot.dens,id.vars=1)
@@ -812,7 +829,7 @@ ggplot(fral.df_plot.dens,aes(x=site,y=value,fill=variable)) +
   xlab('Site') +
   scale_fill_discrete( name='Observation\nYear',
                        breaks=c('plot.dens.2010','plot.dens.2011','plot.dens.2012'),
-                       labels=c('2010','2011','2012') )
+                       labels=c('2010','2011','2012') ) 
 ```
 
 ```{r densAnova,echo=FALSE}
