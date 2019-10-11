@@ -83,8 +83,8 @@ Table 1: Ecological categorization of field sites.
 ## ******************************************************************** ##
 ## Importing demographic data
 ## ******************************************************************** ##
-FRAL_DEMOG_DIR <- '/Users/mlammens/Dropbox/F-Alnus/Chapter-5-FRAL-Demography/'
-setwd('/Users/mlammens/Dropbox/F-Alnus/Chapter-5-FRAL-Demography/')
+FRAL_DEMOG_DIR <- '~/Dropbox/F-Alnus/Chapter-5-FRAL-Demography/'
+setwd('~/Dropbox/F-Alnus/Chapter-5-FRAL-Demography/')
 
 ## Read in demographic data
 unh <- read.csv('data/unh_data.csv')
